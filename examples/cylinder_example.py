@@ -1,11 +1,11 @@
 """
-Simple example: Generate and visualize a rectangular plate mesh.
+Example: Generate and visualize a cylinder mesh.
 
-This demonstrates Phase 1 functionality:
-- Geometry primitive (rectangular plate)
-- Mesh generation with trimesh (replacing Delaunay)
+This demonstrates:
+- Cylinder geometry primitive
+- Mesh generation with trimesh
 - RWG connectivity computation
-- Mesh visualization and validation
+- Mesh visualization
 """
 
 import sys
@@ -18,7 +18,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from pyMoM3d import (
-    RectangularPlate,
+    Cylinder,
     PythonMesher,
     compute_rwg_connectivity,
     plot_mesh_3d,
@@ -27,28 +27,27 @@ from pyMoM3d import (
 
 
 def main():
-    """Generate and visualize a rectangular plate mesh."""
+    """Generate and visualize a cylinder mesh."""
     
     print("=" * 60)
-    print("Rectangular Plate Mesh Example")
+    print("Cylinder Mesh Example")
     print("=" * 60)
     
-    # Create a rectangular plate
-    width = 1.0
-    height = 0.5
-    plate = RectangularPlate(width, height, center=(0, 0, 0))
+    # Create a cylinder
+    radius = 0.3
+    height = 1.0
+    cylinder = Cylinder(radius, height, center=(0, 0, 0))
     
-    print(f"\nPlate dimensions: {width} × {height}")
-    print(f"Plate center: {plate.center}")
-    
-    # Generate refined mesh with specified density using trimesh
-    subdivisions = 10  # Controls mesh density
-    print(f"\nMesh subdivisions: {subdivisions} × {subdivisions}")
+    print(f"\nCylinder radius: {radius}")
+    print(f"Cylinder height: {height}")
+    print(f"Cylinder center: {cylinder.center}")
     
     # Create mesh using trimesh
+    sections = 32  # Number of sections around cylinder
+    print(f"\nMesh sections: {sections}")
     print("\nCreating mesh with trimesh...")
     mesher = PythonMesher()
-    trimesh_obj = plate.to_trimesh(subdivisions=subdivisions)
+    trimesh_obj = cylinder.to_trimesh(sections=sections)
     mesh = mesher.mesh_from_geometry(trimesh_obj)
     
     # Validate mesh
@@ -85,21 +84,24 @@ def main():
     
     ax1 = fig.add_subplot(131, projection='3d')
     plot_mesh_3d(mesh, ax=ax1, show_edges=True, show_normals=False)
+    ax1.set_title('3D View')
     
     # 2D projection (xy-plane)
     ax2 = fig.add_subplot(132)
     plot_mesh(mesh, projection='xy', ax=ax2, show_edges=True)
+    ax2.set_title('XY Projection')
     
     # 2D projection with normals
     ax3 = fig.add_subplot(133, projection='3d')
-    plot_mesh_3d(mesh, ax=ax3, show_edges=True, show_normals=True, normal_scale=0.05)
+    plot_mesh_3d(mesh, ax=ax3, show_edges=True, show_normals=True, normal_scale=0.1)
+    ax3.set_title('With Normals')
     
     plt.tight_layout()
     
     # Save figure to images directory
     images_dir = os.path.join(os.path.dirname(__file__), '..', 'images')
     os.makedirs(images_dir, exist_ok=True)
-    output_file = os.path.join(images_dir, 'plate_mesh_example.png')
+    output_file = os.path.join(images_dir, 'cylinder_example.png')
     plt.savefig(output_file, dpi=150, bbox_inches='tight')
     print(f"\nSaved visualization to: {output_file}")
     

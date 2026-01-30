@@ -242,3 +242,121 @@ class Mesh:
             'mean_edge_length': np.mean(self.edge_lengths),
         }
         return stats
+    
+    def validate(self) -> Dict[str, any]:
+        """
+        Validate mesh topology and geometry.
+        
+        Returns
+        -------
+        validation_results : dict
+            Dictionary containing validation results with keys:
+            - 'is_valid': bool, overall validity
+            - 'has_duplicate_vertices': bool
+            - 'num_duplicate_vertices': int
+            - 'has_degenerate_triangles': bool
+            - 'num_degenerate_triangles': int
+            - 'has_non_manifold_edges': bool
+            - 'num_non_manifold_edges': int
+            - 'has_inconsistent_orientation': bool
+            - 'warnings': list of str, validation warnings
+        """
+        results = {
+            'is_valid': True,
+            'has_duplicate_vertices': False,
+            'num_duplicate_vertices': 0,
+            'has_degenerate_triangles': False,
+            'num_degenerate_triangles': 0,
+            'has_non_manifold_edges': False,
+            'num_non_manifold_edges': 0,
+            'has_inconsistent_orientation': False,
+            'warnings': []
+        }
+        
+        # Check for duplicate vertices
+        # Use a tolerance for floating point comparison
+        tolerance = 1e-10
+        unique_vertices = []
+        vertex_map = {}
+        for i, v in enumerate(self.vertices):
+            is_duplicate = False
+            for j, uv in enumerate(unique_vertices):
+                if np.linalg.norm(v - uv) < tolerance:
+                    vertex_map[i] = j
+                    is_duplicate = True
+                    results['num_duplicate_vertices'] += 1
+                    break
+            if not is_duplicate:
+                unique_vertices.append(v)
+                vertex_map[i] = len(unique_vertices) - 1
+        
+        if results['num_duplicate_vertices'] > 0:
+            results['has_duplicate_vertices'] = True
+            results['is_valid'] = False
+            results['warnings'].append(
+                f"Found {results['num_duplicate_vertices']} duplicate vertices"
+            )
+        
+        # Check for degenerate triangles
+        degenerate_threshold = 1e-12
+        for i, area in enumerate(self.triangle_areas):
+            if area < degenerate_threshold:
+                results['num_degenerate_triangles'] += 1
+        
+        if results['num_degenerate_triangles'] > 0:
+            results['has_degenerate_triangles'] = True
+            results['is_valid'] = False
+            results['warnings'].append(
+                f"Found {results['num_degenerate_triangles']} degenerate triangles"
+            )
+        
+        # Check for non-manifold edges (edges shared by more than 2 triangles)
+        for edge_idx, triangles in self.edge_to_triangles.items():
+            if len(triangles) > 2:
+                results['num_non_manifold_edges'] += 1
+        
+        if results['num_non_manifold_edges'] > 0:
+            results['has_non_manifold_edges'] = True
+            results['is_valid'] = False
+            results['warnings'].append(
+                f"Found {results['num_non_manifold_edges']} non-manifold edges"
+            )
+        
+        # Check for consistent face orientation
+        # For each interior edge, check that triangles have opposite normals
+        # (simplified check - in practice, need to check edge orientation)
+        for edge_idx, triangles in self.edge_to_triangles.items():
+            if len(triangles) == 2:
+                t1, t2 = triangles[0], triangles[1]
+                n1 = self.triangle_normals[t1]
+                n2 = self.triangle_normals[t2]
+                # Normals should point in opposite directions for shared edge
+                # This is a simplified check
+                dot_product = np.dot(n1, n2)
+                if dot_product > 0.9:  # Too similar (should be ~-1 for opposite)
+                    results['has_inconsistent_orientation'] = True
+                    results['warnings'].append(
+                        f"Edge {edge_idx} has inconsistent triangle orientation"
+                    )
+                    break
+        
+        return results
+    
+    @classmethod
+    def from_trimesh(cls, trimesh_obj) -> 'Mesh':
+        """
+        Create a Mesh object from a trimesh.Trimesh object.
+        
+        Parameters
+        ----------
+        trimesh_obj : trimesh.Trimesh
+            Trimesh object to convert
+        
+        Returns
+        -------
+        mesh : Mesh
+            Mesh object with vertices and triangles from trimesh
+        """
+        vertices = np.asarray(trimesh_obj.vertices, dtype=np.float64)
+        triangles = np.asarray(trimesh_obj.faces, dtype=np.int32)
+        return cls(vertices, triangles)
