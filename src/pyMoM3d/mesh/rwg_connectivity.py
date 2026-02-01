@@ -1,110 +1,127 @@
 """RWG basis function connectivity computation."""
 
+import warnings
 import numpy as np
-from typing import Tuple
 
 from .mesh_data import Mesh
+from .rwg_basis import RWGBasis
 
 
-def compute_rwg_connectivity(mesh: Mesh) -> np.ndarray:
+def compute_rwg_connectivity(mesh: Mesh) -> RWGBasis:
     """
-    Compute RWG basis function pairs from mesh connectivity.
-    
-    RWG (Rao-Wilton-Glisson) basis functions are defined on pairs of
-    triangles sharing a common edge. Each interior edge gives rise to
-    one basis function. Boundary edges (edges belonging to only one
-    triangle) also give rise to basis functions.
-    
+    Compute RWG basis functions from mesh connectivity.
+
+    Each interior edge (shared by exactly two triangles) produces one RWG
+    basis function.  Boundary edges are counted but excluded from the basis
+    set.
+
+    The result is stored on ``mesh.rwg_basis`` and the legacy
+    ``mesh.rwg_pairs`` is also updated for backward compatibility.
+
     Parameters
     ----------
     mesh : Mesh
-        Mesh object with computed edges and edge_to_triangles mapping
-    
+        Mesh with computed edges and edge_to_triangles.
+
     Returns
     -------
-    rwg_pairs : ndarray, shape (N_basis, 2)
-        Array where each row [t1, t2] represents a basis function.
-        t1 and t2 are triangle indices. For boundary edges, t2 = -1.
-        The basis function is defined with positive direction from t1 to t2.
+    rwg_basis : RWGBasis
+        Enriched RWG basis data.
     """
-    rwg_pairs = []
-    
-    for edge_idx, edge in enumerate(mesh.edges):
+    edge_indices = []
+    edge_lengths = []
+    t_plus_list = []
+    t_minus_list = []
+    free_vertex_plus_list = []
+    free_vertex_minus_list = []
+    area_plus_list = []
+    area_minus_list = []
+
+    rwg_pairs = []  # legacy
+    num_boundary = 0
+
+    for edge_idx in range(len(mesh.edges)):
         triangles = mesh.edge_to_triangles[edge_idx]
-        
-        if len(triangles) == 2:
-            # Interior edge: two triangles share this edge
-            t1, t2 = triangles[0], triangles[1]
-            
-            # Determine orientation: ensure edge direction is consistent
-            # RWG basis function direction: from t1 to t2
-            # We need to check edge orientation in each triangle
-            edge_orientation = _get_edge_orientation(mesh, edge_idx, t1, t2)
-            
-            if edge_orientation:
-                rwg_pairs.append([t1, t2])
-            else:
-                rwg_pairs.append([t2, t1])
-        
-        elif len(triangles) == 1:
-            # Boundary edge: only one triangle
-            t1 = triangles[0]
-            rwg_pairs.append([t1, -1])  # -1 indicates boundary
-        
+
+        if len(triangles) == 1:
+            # Boundary edge
+            num_boundary += 1
+            rwg_pairs.append([triangles[0], -1])
+            continue
+
+        if len(triangles) != 2:
+            raise ValueError(
+                f"Edge {edge_idx} has {len(triangles)} triangles (expected 1 or 2)"
+            )
+
+        # Interior edge — create basis function
+        edge = mesh.edges[edge_idx]
+        ev = set(int(v) for v in edge)
+
+        t1, t2 = triangles[0], triangles[1]
+
+        # Identify free vertices (the vertex in each triangle NOT on the shared edge)
+        tri1_verts = set(int(v) for v in mesh.triangles[t1])
+        tri2_verts = set(int(v) for v in mesh.triangles[t2])
+        free1 = (tri1_verts - ev).pop()
+        free2 = (tri2_verts - ev).pop()
+
+        # Determine T+ and T-:
+        # In T+, the edge traversal in the triangle's winding goes v_a -> v_b
+        # where (v_a, v_b) are the shared edge vertices in the triangle's
+        # cyclic order.  T+ is defined so that the current flows away from
+        # the free vertex.
+        #
+        # Convention: look at the cyclic order of vertices in t1.
+        # If the shared edge appears as (..., v_a, v_b, free1, ...) in
+        # cyclic order, then the RWG vector rho = r - r_free points away
+        # from free1 across the edge, which is the T+ definition.
+        #
+        # We assign T+ = t1 when the edge (v0, v1) appears in the cyclic
+        # order of t1 (i.e., v0 immediately precedes v1).
+        tri1 = mesh.triangles[t1]
+        idx_v0 = int(np.where(tri1 == edge[0])[0][0])
+        idx_v1 = int(np.where(tri1 == edge[1])[0][0])
+
+        if (idx_v0 + 1) % 3 == idx_v1:
+            # Edge goes v0->v1 in t1's winding => t1 is T+
+            tp, tm = t1, t2
+            fvp, fvm = free1, free2
         else:
-            # Should not happen for a valid mesh
-            raise ValueError(f"Edge {edge_idx} has {len(triangles)} triangles (expected 1 or 2)")
-    
-    rwg_pairs = np.array(rwg_pairs, dtype=np.int32)
-    
-    # Update mesh with computed RWG pairs
-    mesh.rwg_pairs = rwg_pairs
-    
-    return rwg_pairs
+            # Edge goes v1->v0 in t1's winding => t1 is T-
+            tp, tm = t2, t1
+            fvp, fvm = free2, free1
 
+        edge_indices.append(edge_idx)
+        edge_lengths.append(float(mesh.edge_lengths[edge_idx]))
+        t_plus_list.append(tp)
+        t_minus_list.append(tm)
+        free_vertex_plus_list.append(fvp)
+        free_vertex_minus_list.append(fvm)
+        area_plus_list.append(float(mesh.triangle_areas[tp]))
+        area_minus_list.append(float(mesh.triangle_areas[tm]))
 
-def _get_edge_orientation(mesh: Mesh, edge_idx: int, t1: int, t2: int) -> bool:
-    """
-    Determine the orientation of an edge relative to two triangles.
-    
-    For RWG basis functions, we need to ensure consistent orientation:
-    - In triangle t1, the edge should point from first vertex to second
-    - In triangle t2, the edge should point from second vertex to first
-    - This ensures the basis function flows from t1 to t2
-    
-    Parameters
-    ----------
-    mesh : Mesh
-        Mesh object
-    edge_idx : int
-        Index of the edge
-    t1 : int
-        First triangle index
-    t2 : int
-        Second triangle index
-    
-    Returns
-    -------
-    orientation : bool
-        True if edge orientation in t1 matches mesh edge direction,
-        False otherwise
-    """
-    edge = mesh.edges[edge_idx]
-    v0, v1 = edge[0], edge[1]
-    
-    tri1 = mesh.triangles[t1]
-    tri2 = mesh.triangles[t2]
-    
-    # Find position of edge vertices in triangle t1
-    idx_v0_t1 = np.where(tri1 == v0)[0][0]
-    idx_v1_t1 = np.where(tri1 == v1)[0][0]
-    
-    # Check if vertices are consecutive in triangle (cyclic)
-    # If v0 comes before v1 in the triangle's vertex order, orientation is positive
-    next_idx = (idx_v0_t1 + 1) % 3
-    if next_idx == idx_v1_t1:
-        # v0 -> v1 is the natural order in triangle t1
-        return True
-    else:
-        # v1 -> v0 is the natural order in triangle t1
-        return False
+        rwg_pairs.append([tp, tm])
+
+    num_basis = len(edge_indices)
+
+    rwg_basis = RWGBasis(
+        num_basis=num_basis,
+        edge_index=np.array(edge_indices, dtype=np.int32),
+        edge_length=np.array(edge_lengths, dtype=np.float64),
+        t_plus=np.array(t_plus_list, dtype=np.int32),
+        t_minus=np.array(t_minus_list, dtype=np.int32),
+        free_vertex_plus=np.array(free_vertex_plus_list, dtype=np.int32),
+        free_vertex_minus=np.array(free_vertex_minus_list, dtype=np.int32),
+        area_plus=np.array(area_plus_list, dtype=np.float64),
+        area_minus=np.array(area_minus_list, dtype=np.float64),
+        num_boundary_edges=num_boundary,
+    )
+
+    # Store on mesh
+    mesh.rwg_basis = rwg_basis
+
+    # Legacy: store rwg_pairs (interior pairs first, then boundary)
+    mesh.rwg_pairs = np.array(rwg_pairs, dtype=np.int32) if rwg_pairs else None
+
+    return rwg_basis

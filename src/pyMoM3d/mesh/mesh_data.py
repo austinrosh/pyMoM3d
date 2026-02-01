@@ -1,5 +1,6 @@
 """Core mesh data structures."""
 
+import warnings
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 
@@ -105,6 +106,9 @@ class Mesh:
             self.rwg_pairs = None
         else:
             self.rwg_pairs = np.asarray(rwg_pairs, dtype=np.int32)
+
+        # Will be populated by compute_rwg_connectivity()
+        self.rwg_basis = None
     
     def _compute_triangle_normals(self) -> np.ndarray:
         """Compute outward-pointing normal vectors for each triangle."""
@@ -243,6 +247,37 @@ class Mesh:
         }
         return stats
     
+    def check_density(self, frequency: float) -> bool:
+        """Check if mesh density is adequate for the given frequency.
+
+        Warns if the mean edge length exceeds lambda/10.
+
+        Parameters
+        ----------
+        frequency : float
+            Operating frequency in Hz.
+
+        Returns
+        -------
+        adequate : bool
+            True if mesh density is sufficient.
+        """
+        from ..utils.constants import c0
+
+        wavelength = c0 / frequency
+        mean_edge = float(np.mean(self.edge_lengths))
+        threshold = wavelength / 10.0
+
+        if mean_edge > threshold:
+            warnings.warn(
+                f"Mesh too coarse: mean edge length {mean_edge:.4g} m "
+                f"> lambda/10 = {threshold:.4g} m at {frequency:.4g} Hz. "
+                f"Consider refining the mesh.",
+                stacklevel=2,
+            )
+            return False
+        return True
+
     def validate(self) -> Dict[str, any]:
         """
         Validate mesh topology and geometry.
