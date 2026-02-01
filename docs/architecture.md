@@ -13,23 +13,53 @@ Each stage is implemented in a dedicated module. Data flows left to right; the o
 
 ## Stage 1: Geometry (`geometry/`)
 
-Five parametric primitives generate triangulated surface geometry via the `trimesh` library:
+Five parametric primitives are available:
 
 | Primitive | Constructor Parameters | Surface Type |
 |---|---|---|
 | `RectangularPlate` | `width`, `height`, `center` | Open flat surface |
-| `Sphere` | `radius`, `center` | Closed surface (icosphere) |
-| `Cylinder` | `radius`, `height`, `center` | Open surface (no caps) |
+| `Sphere` | `radius`, `center` | Closed surface |
+| `Cylinder` | `radius`, `height`, `center` | Closed surface (with caps via Gmsh) |
 | `Cube` | `side_length`, `center` | Closed surface |
 | `Pyramid` | `base_size`, `height`, `center` | Closed surface |
 
-Each primitive has a `to_trimesh(subdivisions=...)` method that returns a `trimesh.Trimesh` object. The `subdivisions` parameter controls mesh density — higher values produce more triangles.
+### Meshing with Gmsh (recommended)
 
-You can also load geometry from an STL file:
+`GmshMesher` generates meshes directly from geometry primitives using the Gmsh CAD kernel. This provides control over element size, curvature adaptation, and mesh quality:
+
+```python
+from pyMoM3d import Sphere, GmshMesher
+
+mesher = GmshMesher(target_edge_length=0.02)
+mesh = mesher.mesh_from_geometry(Sphere(radius=0.1))
+```
+
+Individual meshing methods are also available: `mesh_sphere()`, `mesh_plate()`, `mesh_cylinder()`, `mesh_cube()`, `mesh_pyramid()`.
+
+### Meshing with trimesh (legacy)
+
+Each primitive also has a `to_trimesh(subdivisions=...)` method that returns a `trimesh.Trimesh` object for use with the `PythonMesher`:
+
+```python
+from pyMoM3d import Sphere, PythonMesher
+mesh = PythonMesher().mesh_from_geometry(Sphere(radius=0.1).to_trimesh(subdivisions=2))
+```
+
+### Loading from file
+
+STL files (and with Gmsh: STEP, IGES) can be loaded directly:
 
 ```python
 from pyMoM3d import load_stl
-mesh = load_stl("my_model.stl")
+mesh = load_stl("my_model.stl")                  # via trimesh
+mesh = load_stl("my_model.stl", mesher='gmsh')   # via Gmsh
+```
+
+With `GmshMesher`, you can also load STEP/IGES files:
+
+```python
+from pyMoM3d import GmshMesher
+mesh = GmshMesher(target_edge_length=0.01).mesh_from_file("antenna.step")
 ```
 
 ## Stage 2: Mesh (`mesh/`)
@@ -48,7 +78,7 @@ The `Mesh` class (`mesh/mesh_data.py`) stores the triangulated surface:
 | `edge_lengths` | `(N_e,)` | Edge lengths |
 | `edge_to_triangles` | `dict` | Edge index -> list of triangle indices |
 
-Edges and derived quantities are computed automatically when the mesh is created. The `PythonMesher` class handles conversion from `trimesh` objects, including mesh cleaning (merging duplicate vertices, removing degenerate faces, fixing winding orientation).
+Edges and derived quantities are computed automatically when the mesh is created. Both `GmshMesher` and `PythonMesher` produce `Mesh` objects. `GmshMesher` generates clean meshes directly from the Gmsh kernel; `PythonMesher` handles conversion from `trimesh` objects with mesh cleaning (merging duplicate vertices, removing degenerate faces, fixing winding orientation).
 
 ### Mesh Quality
 

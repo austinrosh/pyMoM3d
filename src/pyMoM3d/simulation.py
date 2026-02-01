@@ -98,11 +98,15 @@ class Simulation:
     ----------
     config : SimulationConfig
     geometry : object
-        Geometry primitive with to_trimesh() method.
+        Geometry primitive (RectangularPlate, Sphere, etc.).
     mesh : Mesh, optional
         Pre-built mesh. If None, mesh is generated from geometry.
     subdivisions : int
-        Subdivision level for mesh generation.
+        Subdivision level for trimesh mesh generation.
+    mesher : str
+        Mesher backend: 'trimesh' (default) or 'gmsh'.
+    target_edge_length : float, optional
+        Target edge length in meters (used with mesher='gmsh').
     """
 
     def __init__(
@@ -111,6 +115,8 @@ class Simulation:
         geometry=None,
         mesh: Mesh = None,
         subdivisions: int = 2,
+        mesher: str = 'trimesh',
+        target_edge_length: Optional[float] = None,
     ):
         self.config = config
         self.geometry = geometry
@@ -119,9 +125,14 @@ class Simulation:
         if mesh is not None:
             self.mesh = mesh
         elif geometry is not None:
-            mesher = PythonMesher()
-            trimesh_obj = geometry.to_trimesh(subdivisions=subdivisions)
-            self.mesh = mesher.mesh_from_geometry(trimesh_obj)
+            if mesher == 'gmsh':
+                from .mesh.gmsh_mesher import GmshMesher
+                gmsh_mesher = GmshMesher(target_edge_length=target_edge_length)
+                self.mesh = gmsh_mesher.mesh_from_geometry(geometry)
+            else:
+                trimesh_mesher = PythonMesher()
+                trimesh_obj = geometry.to_trimesh(subdivisions=subdivisions)
+                self.mesh = trimesh_mesher.mesh_from_geometry(trimesh_obj)
         else:
             raise ValueError("Either geometry or mesh must be provided")
 
@@ -192,19 +203,24 @@ class Simulation:
         )
 
 
-def load_stl(path: str) -> Mesh:
+def load_stl(path: str, mesher: str = 'trimesh') -> Mesh:
     """Load a mesh from an STL file.
 
     Parameters
     ----------
     path : str
         Path to .stl file.
+    mesher : str
+        Mesher backend: 'trimesh' (default) or 'gmsh'.
 
     Returns
     -------
     mesh : Mesh
     """
+    if mesher == 'gmsh':
+        from .mesh.gmsh_mesher import GmshMesher
+        return GmshMesher().mesh_from_file(path)
     import trimesh
     trimesh_obj = trimesh.load(path)
-    mesher = PythonMesher()
-    return mesher.mesh_from_geometry(trimesh_obj)
+    m = PythonMesher()
+    return m.mesh_from_geometry(trimesh_obj)

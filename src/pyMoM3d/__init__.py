@@ -8,6 +8,7 @@ from .mesh import (
     create_rectangular_mesh,
     PythonMesher,
     create_mesh_from_trimesh,
+    GmshMesher,
     compute_rwg_connectivity,
 )
 from .visualization import plot_mesh, plot_mesh_3d, plot_surface_current, compute_triangle_current_density
@@ -30,7 +31,7 @@ __all__ = [
     # Mesh
     'Mesh', 'RWGBasis',
     'create_mesh_from_vertices', 'create_rectangular_mesh',
-    'PythonMesher', 'create_mesh_from_trimesh', 'compute_rwg_connectivity',
+    'PythonMesher', 'create_mesh_from_trimesh', 'GmshMesher', 'compute_rwg_connectivity',
     # Visualization
     'plot_mesh', 'plot_mesh_3d', 'plot_surface_current', 'compute_triangle_current_density',
     # Constants

@@ -34,7 +34,8 @@ The runtime dependencies are listed in `requirements.txt`:
 - **numpy** — array computation
 - **scipy** — spherical Bessel functions (Mie series), GMRES solver
 - **matplotlib** — plotting and visualization
-- **trimesh** — geometry meshing (icosphere, cylinder, etc.)
+- **gmsh** — high-quality surface meshing with element size control (recommended mesher)
+- **trimesh** — geometry meshing fallback (icosphere, cylinder, etc.)
 
 All commands in this documentation assume you run them from the repository root with `PYTHONPATH=src` set, or equivalently:
 
@@ -47,7 +48,7 @@ export PYTHONPATH=src
 ```python
 import numpy as np
 from pyMoM3d import (
-    Sphere, PythonMesher, compute_rwg_connectivity,
+    Sphere, GmshMesher, compute_rwg_connectivity,
     fill_impedance_matrix, PlaneWaveExcitation, solve_direct,
     compute_far_field, compute_rcs,
     plot_mesh_3d, plot_surface_current,
@@ -59,11 +60,10 @@ radius = 0.1           # meters
 frequency = 1.5e9      # Hz
 k = 2.0 * np.pi * frequency / c0
 
-# 2. Create mesh
+# 2. Create mesh (Gmsh gives element size control)
 sphere = Sphere(radius=radius)
-trimesh_obj = sphere.to_trimesh(subdivisions=2)
-mesher = PythonMesher()
-mesh = mesher.mesh_from_geometry(trimesh_obj)
+mesher = GmshMesher(target_edge_length=0.02)  # ~lambda/10 at 1.5 GHz
+mesh = mesher.mesh_from_geometry(sphere)
 basis = compute_rwg_connectivity(mesh)
 
 # 3. Fill impedance matrix and solve
@@ -88,7 +88,7 @@ plot_surface_current(I, basis, mesh, cmap='hot')
 
 ## Quick Start: High-Level Simulation Driver
 
-For convenience, the `Simulation` class wraps the full pipeline:
+For convenience, the `Simulation` class wraps the full pipeline. Pass `mesher='gmsh'` to use the Gmsh backend:
 
 ```python
 import numpy as np
@@ -105,8 +105,13 @@ exc = PlaneWaveExcitation(
 )
 config = SimulationConfig(frequency=1.5e9, excitation=exc)
 
-# Create and run
-sim = Simulation(config, geometry=Sphere(radius=0.1), subdivisions=2)
+# Create and run (using Gmsh mesher)
+sim = Simulation(
+    config,
+    geometry=Sphere(radius=0.1),
+    mesher='gmsh',
+    target_edge_length=0.02,
+)
 result = sim.run()
 
 print(f"Condition number: {result.condition_number:.2e}")

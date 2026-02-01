@@ -1,15 +1,11 @@
 """
 Example: PEC Sphere RCS — MoM vs Mie Series Validation
 
-This is the critical validation example for the solver. It:
-1. Meshes a PEC sphere
-2. Illuminates with a plane wave
-3. Solves the EFIE for surface currents
-4. Computes bistatic RCS
-5. Compares against the exact Mie series solution
+Produces two plots:
+  Left:  Monostatic RCS (dBsm) vs frequency
+  Right: Bistatic RCS (dBsm) vs elevation angle at a single frequency
 
-A match to within a few dB at ka ~ 1 with lambda/10 meshing
-confirms the solver is working correctly.
+Plus a 3D mesh visualization.
 """
 
 import sys
@@ -22,7 +18,7 @@ import matplotlib.pyplot as plt
 
 from pyMoM3d import (
     Sphere,
-    PythonMesher,
+    GmshMesher,
     compute_rwg_connectivity,
     fill_impedance_matrix,
     PlaneWaveExcitation,
@@ -30,11 +26,10 @@ from pyMoM3d import (
     compute_far_field,
     compute_rcs,
     plot_mesh_3d,
-    plot_surface_current,
     eta0,
     c0,
 )
-from pyMoM3d.analysis.mie_series import mie_rcs_pec_sphere
+from pyMoM3d.analysis.mie_series import mie_rcs_pec_sphere, mie_monostatic_rcs_pec_sphere
 
 
 def main():
@@ -44,25 +39,25 @@ def main():
 
     # --- Parameters ---
     radius = 0.1           # meters
-    frequency = 1.5e9      # Hz  (ka ~ pi at this freq/radius)
-    subdivisions = 2       # icosphere refinement
+    target_edge_length = 0.02  # ~lambda/10 at 1.5 GHz
 
-    k = 2.0 * np.pi * frequency / c0
-    wavelength = c0 / frequency
-    ka = k * radius
+    # Frequencies for monostatic sweep
+    frequencies = np.linspace(0.5e9, 2.0e9, 16)
 
-    print(f"\nRadius:       {radius} m")
-    print(f"Frequency:    {frequency/1e9:.2f} GHz")
-    print(f"Wavelength:   {wavelength:.4f} m")
-    print(f"ka:           {ka:.3f}")
-    print(f"lambda/10:    {wavelength/10:.4f} m")
+    # Fixed frequency for bistatic plot
+    f_bistatic = 1.0e9
 
-    # --- Mesh ---
-    print("\n--- Meshing ---")
     sphere = Sphere(radius=radius)
-    trimesh_obj = sphere.to_trimesh(subdivisions=subdivisions)
-    mesher = PythonMesher()
-    mesh = mesher.mesh_from_geometry(trimesh_obj)
+
+    print(f"\nRadius:             {radius} m")
+    print(f"Target edge length: {target_edge_length} m")
+    print(f"Monostatic sweep:   {frequencies[0]/1e9:.1f} - {frequencies[-1]/1e9:.1f} GHz ({len(frequencies)} points)")
+    print(f"Bistatic frequency: {f_bistatic/1e9:.1f} GHz")
+
+    # --- Mesh (single mesh used for all frequencies) ---
+    print("\n--- Meshing ---")
+    mesher = GmshMesher(target_edge_length=target_edge_length)
+    mesh = mesher.mesh_from_geometry(sphere)
     basis = compute_rwg_connectivity(mesh)
 
     stats = mesh.get_statistics()
@@ -70,85 +65,108 @@ def main():
     print(f"Triangles:    {stats['num_triangles']}")
     print(f"RWG basis:    {basis.num_basis}")
     print(f"Mean edge:    {stats['mean_edge_length']:.4f} m")
-    print(f"Edges/lambda: {wavelength / stats['mean_edge_length']:.1f}")
 
-    mesh.check_density(frequency)
-
-    # --- Z-matrix fill ---
-    print("\n--- Impedance matrix fill ---")
-    Z = fill_impedance_matrix(basis, mesh, k, eta0, quad_order=4)
-    print(f"Z shape:      {Z.shape}")
-    print(f"Z symmetric:  {np.allclose(Z, Z.T, atol=1e-10)}")
-    print(f"Cond(Z):      {np.linalg.cond(Z):.2e}")
-
-    # --- Excitation + solve ---
-    print("\n--- Plane wave excitation + solve ---")
+    # --- Excitation (same for all frequencies) ---
     exc = PlaneWaveExcitation(
         E0=np.array([1.0, 0.0, 0.0]),      # x-polarized
         k_hat=np.array([0.0, 0.0, -1.0]),   # propagating in -z
     )
-    V = exc.compute_voltage_vector(basis, mesh, k)
-    I = solve_direct(Z, V)
 
-    residual = np.linalg.norm(Z @ I - V) / np.linalg.norm(V)
+    # ============================================================
+    # Monostatic RCS vs frequency
+    # ============================================================
+    print("\n--- Monostatic RCS sweep ---")
+    rcs_mono_mom_dBsm = np.zeros(len(frequencies))
+    rcs_mono_mie_dBsm = np.zeros(len(frequencies))
+
+    for i, freq in enumerate(frequencies):
+        k = 2.0 * np.pi * freq / c0
+        ka = k * radius
+        wavelength = c0 / freq
+
+        # MoM solve
+        Z = fill_impedance_matrix(basis, mesh, k, eta0, quad_order=4)
+        V = exc.compute_voltage_vector(basis, mesh, k)
+        I = solve_direct(Z, V)
+
+        # Backscatter: +z direction (theta=0 in spherical coords)
+        # Wave propagates in -z, so backscatter is +z = theta~0
+        theta_back = np.array([0.001])
+        phi_back = np.array([0.0])
+        E_th, E_ph = compute_far_field(I, basis, mesh, k, eta0, theta_back, phi_back)
+        rcs_mono_mom_dBsm[i] = compute_rcs(E_th, E_ph, E_inc_mag=1.0)[0]
+
+        # Mie monostatic (returns sigma / (pi*a^2), convert to dBsm)
+        mie_norm = mie_monostatic_rcs_pec_sphere(ka)
+        sigma_mie = mie_norm * np.pi * radius**2
+        rcs_mono_mie_dBsm[i] = 10.0 * np.log10(max(sigma_mie, 1e-30))
+
+        print(f"  f={freq/1e9:5.2f} GHz, ka={ka:.2f}: "
+              f"MoM={rcs_mono_mom_dBsm[i]:7.2f} dBsm, "
+              f"Mie={rcs_mono_mie_dBsm[i]:7.2f} dBsm, "
+              f"err={abs(rcs_mono_mom_dBsm[i]-rcs_mono_mie_dBsm[i]):.2f} dB")
+
+    # ============================================================
+    # Bistatic RCS vs angle at f_bistatic
+    # ============================================================
+    print(f"\n--- Bistatic RCS at {f_bistatic/1e9:.1f} GHz ---")
+    k_bi = 2.0 * np.pi * f_bistatic / c0
+    ka_bi = k_bi * radius
+
+    Z_bi = fill_impedance_matrix(basis, mesh, k_bi, eta0, quad_order=4)
+    V_bi = exc.compute_voltage_vector(basis, mesh, k_bi)
+    I_bi = solve_direct(Z_bi, V_bi)
+
+    residual = np.linalg.norm(Z_bi @ I_bi - V_bi) / np.linalg.norm(V_bi)
+    print(f"Cond(Z):        {np.linalg.cond(Z_bi):.2e}")
     print(f"||ZI-V||/||V||: {residual:.2e}")
 
-    # --- Far-field / RCS ---
-    print("\n--- Far-field computation ---")
-    theta = np.linspace(0.001, np.pi - 0.001, 181)
-    phi = np.zeros_like(theta)
+    theta_bi = np.linspace(0.001, np.pi - 0.001, 181)
+    phi_bi = np.zeros_like(theta_bi)
+    E_th_bi, E_ph_bi = compute_far_field(I_bi, basis, mesh, k_bi, eta0, theta_bi, phi_bi)
+    rcs_bi_mom_dBsm = compute_rcs(E_th_bi, E_ph_bi, E_inc_mag=1.0)
 
-    E_theta, E_phi = compute_far_field(I, basis, mesh, k, eta0, theta, phi)
-    rcs_mom_dBsm = compute_rcs(E_theta, E_phi, E_inc_mag=1.0)
+    # Mie bistatic (sigma/(pi*a^2), convert to dBsm)
+    # Mie convention: theta=0 is forward scatter (-z), theta=pi is backscatter (+z)
+    # MoM convention: standard spherical coords, theta=0 is +z, theta=pi is -z
+    # So Mie theta = pi - MoM theta
+    mie_bi_norm = mie_rcs_pec_sphere(ka_bi, np.pi - theta_bi)
+    rcs_bi_mie_dBsm = 10.0 * np.log10(np.maximum(mie_bi_norm * np.pi * radius**2, 1e-30))
 
-    # Normalize to sigma / (pi*a^2) for comparison with Mie
-    rcs_mom_linear = 10.0**(rcs_mom_dBsm / 10.0)
-    rcs_mom_norm = rcs_mom_linear / (np.pi * radius**2)
-
-    # --- Mie series ---
-    print("--- Mie series reference ---")
-    rcs_mie_norm = mie_rcs_pec_sphere(ka, theta)
-
-    # --- Comparison ---
-    # Backscatter (theta = pi)
-    idx_back = -1
-    mom_back_dB = 10.0 * np.log10(max(rcs_mom_norm[idx_back], 1e-30))
-    mie_back_dB = 10.0 * np.log10(max(rcs_mie_norm[idx_back], 1e-30))
-    print(f"\nBackscatter RCS / (pi*a^2):")
-    print(f"  MoM:  {mom_back_dB:.2f} dB")
-    print(f"  Mie:  {mie_back_dB:.2f} dB")
-    print(f"  Error: {abs(mom_back_dB - mie_back_dB):.2f} dB")
-
-    # --- Plot ---
+    # ============================================================
+    # Plots
+    # ============================================================
     images_dir = os.path.join(os.path.dirname(__file__), '..', 'images')
     os.makedirs(images_dir, exist_ok=True)
 
-    # Figure 1: RCS comparison
-    fig1, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
-    theta_deg = np.degrees(theta)
-    rcs_mie_dB = 10.0 * np.log10(np.maximum(rcs_mie_norm, 1e-30))
-    rcs_mom_dB = 10.0 * np.log10(np.maximum(rcs_mom_norm, 1e-30))
-
-    ax1.plot(theta_deg, rcs_mie_dB, 'k-', linewidth=2, label='Mie (exact)')
-    ax1.plot(theta_deg, rcs_mom_dB, 'r--', linewidth=1.5, label=f'MoM (N={basis.num_basis})')
-    ax1.set_xlabel('Bistatic angle (deg)')
-    ax1.set_ylabel(r'$\sigma / (\pi a^2)$ (dB)')
-    ax1.set_title(f'PEC Sphere Bistatic RCS, ka = {ka:.2f}')
+    # Left: Monostatic RCS vs frequency
+    freq_GHz = frequencies / 1e9
+    ax1.plot(freq_GHz, rcs_mono_mie_dBsm, 'k-', linewidth=2, label='Mie (exact)')
+    ax1.plot(freq_GHz, rcs_mono_mom_dBsm, 'ro--', linewidth=1.5, markersize=5,
+             label=f'MoM (N={basis.num_basis})')
+    ax1.set_xlabel('Frequency (GHz)')
+    ax1.set_ylabel('Monostatic RCS (dBsm)')
+    ax1.set_title(f'Monostatic RCS, PEC sphere a={radius*100:.0f} cm')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
-    ax1.set_xlim([0, 180])
 
-    I_mag = np.abs(I)
-    ax2.bar(range(basis.num_basis), I_mag, color='steelblue', alpha=0.7)
-    ax2.set_xlabel('Basis function index')
-    ax2.set_ylabel('|I_n| (A)')
-    ax2.set_title('Surface current coefficients')
+    # Right: Bistatic RCS vs elevation angle
+    theta_deg = np.degrees(theta_bi)
+    ax2.plot(theta_deg, rcs_bi_mie_dBsm, 'k-', linewidth=2, label='Mie (exact)')
+    ax2.plot(theta_deg, rcs_bi_mom_dBsm, 'r--', linewidth=1.5,
+             label=f'MoM (N={basis.num_basis})')
+    ax2.set_xlabel('Bistatic angle (deg)')
+    ax2.set_ylabel('Bistatic RCS (dBsm)')
+    ax2.set_title(f'Bistatic RCS at {f_bistatic/1e9:.1f} GHz (ka={ka_bi:.2f})')
+    ax2.legend()
     ax2.grid(True, alpha=0.3)
+    ax2.set_xlim([0, 180])
 
-    fig1.tight_layout()
+    fig.tight_layout()
     output_file = os.path.join(images_dir, 'sphere_rcs_validation.png')
-    fig1.savefig(output_file, dpi=150, bbox_inches='tight')
+    fig.savefig(output_file, dpi=150, bbox_inches='tight')
     print(f"\nSaved plot to: {output_file}")
 
     # Figure 2: Mesh visualization
@@ -160,15 +178,6 @@ def main():
                       f'{basis.num_basis} RWG basis functions')
     output_file = os.path.join(images_dir, 'sphere_mesh.png')
     fig2.savefig(output_file, dpi=150, bbox_inches='tight')
-    print(f"Saved plot to: {output_file}")
-
-    # Figure 3: Surface current heatmap
-    fig3 = plt.figure(figsize=(11, 8))
-    ax_curr = fig3.add_subplot(111, projection='3d')
-    plot_surface_current(I, basis, mesh, ax=ax_curr, cmap='hot',
-                         title=f'|J| on PEC Sphere, f = {frequency/1e9:.2f} GHz')
-    output_file = os.path.join(images_dir, 'sphere_surface_current.png')
-    fig3.savefig(output_file, dpi=150, bbox_inches='tight')
     print(f"Saved plot to: {output_file}")
 
     plt.show()

@@ -3,6 +3,7 @@
 from .mesh_data import Mesh
 from .mesher import create_mesh_from_vertices, create_rectangular_mesh
 from .trimesh_mesher import PythonMesher, create_mesh_from_trimesh
+from .gmsh_mesher import GmshMesher
 from .rwg_connectivity import compute_rwg_connectivity
 from .rwg_basis import RWGBasis
 
@@ -13,5 +14,6 @@ __all__ = [
     'create_rectangular_mesh',
     'PythonMesher',
     'create_mesh_from_trimesh',
+    'GmshMesher',
     'compute_rwg_connectivity',
 ]

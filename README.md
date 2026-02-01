@@ -11,7 +11,7 @@ pyMoM3d solves the Electric Field Integral Equation (EFIE) for induced surface c
 ## Features
 
 - **Geometry primitives**: Rectangular plate, sphere, cylinder, cube, pyramid, or load from STL
-- **Automatic meshing**: Triangular surface meshes via [trimesh](https://trimesh.org/) with configurable refinement
+- **Automatic meshing**: Triangular surface meshes via [Gmsh](https://gmsh.info/) (recommended) or [trimesh](https://trimesh.org/) with configurable refinement
 - **RWG basis functions**: Automatic detection of interior edges and basis function assignment
 - **EFIE impedance matrix**: Full dense Z-matrix assembly with singularity extraction (Wilton 1984, Graglia 1993)
 - **Excitation sources**: Plane wave and delta-gap feed
@@ -30,15 +30,16 @@ PYTHONPATH=src python examples/sphere_rcs_validation.py
 ```python
 import numpy as np
 from pyMoM3d import (
-    Sphere, PythonMesher, compute_rwg_connectivity,
+    Sphere, GmshMesher, compute_rwg_connectivity,
     fill_impedance_matrix, PlaneWaveExcitation, solve_direct,
     compute_far_field, compute_rcs, plot_surface_current,
     eta0, c0,
 )
 
-# Create mesh
+# Create mesh (using Gmsh for mesh quality control)
 sphere = Sphere(radius=0.1)
-mesh = PythonMesher().mesh_from_geometry(sphere.to_trimesh(subdivisions=2))
+mesher = GmshMesher(target_edge_length=0.02)
+mesh = mesher.mesh_from_geometry(sphere)
 basis = compute_rwg_connectivity(mesh)
 
 # Solve
@@ -57,7 +58,7 @@ rcs_dBsm = compute_rcs(E_th, E_ph)
 plot_surface_current(I, basis, mesh, cmap='hot')
 ```
 
-Or use the high-level driver:
+Or use the high-level driver (with Gmsh mesher):
 
 ```python
 from pyMoM3d import Sphere, Simulation, SimulationConfig, PlaneWaveExcitation
@@ -66,10 +67,13 @@ exc = PlaneWaveExcitation(E0=np.array([1, 0, 0]), k_hat=np.array([0, 0, -1]))
 sim = Simulation(
     SimulationConfig(frequency=1.5e9, excitation=exc),
     geometry=Sphere(radius=0.1),
-    subdivisions=2,
+    mesher='gmsh',
+    target_edge_length=0.02,
 )
 result = sim.run()
 ```
+
+The trimesh mesher is still available (`mesher='trimesh'`, the default) for backward compatibility.
 
 ## Examples
 

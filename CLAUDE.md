@@ -30,7 +30,8 @@ The library follows a pipeline: **Geometry → Mesh → RWG Basis → (future: M
 ### Core Modules
 
 **`geometry/primitives.py`** - 5 geometry primitives (RectangularPlate, Sphere, Cylinder, Cube, Pyramid)
-- All support `to_trimesh()` conversion for mesh generation
+- All support `to_trimesh()` conversion for trimesh meshing (legacy)
+- All supported by `GmshMesher.mesh_from_geometry()` for Gmsh meshing (recommended)
 - Use `get_vertex_grid(subdivisions)` for mesh refinement control
 
 **`mesh/mesh_data.py`** - Central `Mesh` class storing:
@@ -38,30 +39,44 @@ The library follows a pipeline: **Geometry → Mesh → RWG Basis → (future: M
 - `rwg_pairs` (N×2): RWG basis function pairs where interior edges have [t1, t2] and boundary edges have [t1, -1]
 - `edge_to_triangles`: Dict mapping edge index to triangle indices
 
-**`mesh/trimesh_mesher.py`** - `PythonMesher` class for high-quality mesh generation via trimesh
+**`mesh/gmsh_mesher.py`** - `GmshMesher` class for high-quality mesh generation via Gmsh with `target_edge_length` control, curvature adaptation, and CAD import support. Recommended mesher.
+
+**`mesh/trimesh_mesher.py`** - `PythonMesher` class for mesh generation via trimesh (legacy fallback)
 
 **`mesh/rwg_connectivity.py`** - `compute_rwg_connectivity()` computes RWG basis pairs from mesh topology
 
 **`visualization/mesh_plot.py`** - `plot_mesh_3d()` for 3D surface rendering, `plot_mesh()` for 2D
 
-### Typical Workflow
+### Typical Workflow (Gmsh — recommended)
 
 ```python
-from pyMoM3d import Sphere, PythonMesher, compute_rwg_connectivity, plot_mesh_3d
+from pyMoM3d import Sphere, GmshMesher, compute_rwg_connectivity, plot_mesh_3d
 
 # 1. Create geometry
 sphere = Sphere(radius=1.0)
 
-# 2. Generate mesh
-trimesh_obj = sphere.to_trimesh(subdivisions=3)
-mesher = PythonMesher()
-mesh = mesher.mesh_from_geometry(trimesh_obj)
+# 2. Generate mesh with target edge length
+mesher = GmshMesher(target_edge_length=0.1)
+mesh = mesher.mesh_from_geometry(sphere)
 
 # 3. Validate and compute RWG basis
 mesh.validate()
 compute_rwg_connectivity(mesh)
 
 # 4. Visualize
+plot_mesh_3d(mesh, show_edges=True)
+```
+
+### Typical Workflow (trimesh — legacy)
+
+```python
+from pyMoM3d import Sphere, PythonMesher, compute_rwg_connectivity, plot_mesh_3d
+
+sphere = Sphere(radius=1.0)
+trimesh_obj = sphere.to_trimesh(subdivisions=3)
+mesh = PythonMesher().mesh_from_geometry(trimesh_obj)
+mesh.validate()
+compute_rwg_connectivity(mesh)
 plot_mesh_3d(mesh, show_edges=True)
 ```
 
@@ -77,6 +92,4 @@ From `.cursorrules`:
 
 ## Project Status
 
-**Implemented**: Geometry primitives, mesh data structures, RWG connectivity, trimesh-based meshing, visualization
-
-**Placeholder modules** (empty, reserved for future): `analysis/`, `fields/`, `greens/`, `mom/`, `utils/`
+**Implemented**: Geometry primitives, mesh data structures, RWG connectivity, Gmsh-based meshing (recommended), trimesh-based meshing (legacy fallback), EFIE impedance matrix, excitation sources, solvers, far-field/RCS computation, Mie series validation, visualization, high-level simulation driver

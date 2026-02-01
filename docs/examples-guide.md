@@ -34,13 +34,13 @@ Each example prints progress to the terminal and saves plots to `images/`.
 | `sphere_mesh.png` | 3D mesh visualization |
 | `sphere_surface_current.png` | Surface current density heatmap |
 
-**Relevant code pattern — manual pipeline:**
+**Relevant code pattern — manual pipeline (Gmsh):**
 
 ```python
-# Mesh
+# Mesh (using Gmsh for element size control)
 sphere = Sphere(radius=0.1)
-trimesh_obj = sphere.to_trimesh(subdivisions=2)
-mesh = PythonMesher().mesh_from_geometry(trimesh_obj)
+mesher = GmshMesher(target_edge_length=0.02)
+mesh = mesher.mesh_from_geometry(sphere)
 basis = compute_rwg_connectivity(mesh)
 
 # Solve
@@ -154,9 +154,9 @@ gain_h = np.abs(E_th)**2 + np.abs(E_ph)**2
 **Relevant code pattern — open surface (plate):**
 
 ```python
+# Using Gmsh
 plate = RectangularPlate(width, height)
-trimesh_obj = plate.to_trimesh(subdivisions=4)
-mesh = PythonMesher().mesh_from_geometry(trimesh_obj)
+mesh = GmshMesher(target_edge_length=0.02).mesh_from_geometry(plate)
 basis = compute_rwg_connectivity(mesh)
 # Note: basis.num_boundary_edges > 0 for an open surface
 ```
@@ -219,7 +219,7 @@ loaded = SimulationResult.load("my_result.npz")
 import numpy as np
 from pyMoM3d import (
     Sphere,  # or any geometry primitive
-    PythonMesher, compute_rwg_connectivity,
+    GmshMesher, compute_rwg_connectivity,
     fill_impedance_matrix, PlaneWaveExcitation, solve_direct,
     compute_far_field, compute_rcs,
     plot_surface_current,
@@ -230,9 +230,9 @@ from pyMoM3d import (
 frequency = 1e9
 k = 2 * np.pi * frequency / c0
 
-# Mesh
+# Mesh (Gmsh gives direct control over element size)
 geometry = Sphere(radius=0.1)
-mesh = PythonMesher().mesh_from_geometry(geometry.to_trimesh(subdivisions=2))
+mesh = GmshMesher(target_edge_length=0.02).mesh_from_geometry(geometry)
 basis = compute_rwg_connectivity(mesh)
 mesh.check_density(frequency)
 
@@ -257,7 +257,7 @@ plot_surface_current(I, basis, mesh, cmap='hot')
 ```python
 import numpy as np
 from pyMoM3d import (
-    RectangularPlate, PythonMesher, compute_rwg_connectivity,
+    RectangularPlate, GmshMesher, compute_rwg_connectivity,
     Simulation, SimulationConfig,
     compute_far_field, eta0, c0,
 )
@@ -265,7 +265,7 @@ from pyMoM3d.mom.excitation import DeltaGapExcitation, find_nearest_edge
 
 # Mesh the antenna
 plate = RectangularPlate(0.15, 0.01)
-mesh = PythonMesher().mesh_from_geometry(plate.to_trimesh(subdivisions=6))
+mesh = GmshMesher(target_edge_length=0.005).mesh_from_geometry(plate)
 basis = compute_rwg_connectivity(mesh)
 
 # Feed at center
@@ -291,12 +291,20 @@ E_th, E_ph = compute_far_field(
 )
 ```
 
-### Template: Loading External STL Geometry
+### Template: Loading External Geometry
 
 ```python
-from pyMoM3d import load_stl, compute_rwg_connectivity
+from pyMoM3d import load_stl, GmshMesher, compute_rwg_connectivity
 
+# STL via trimesh (default)
 mesh = load_stl("my_antenna.stl")
+
+# STL via Gmsh (with remeshing control)
+mesh = load_stl("my_antenna.stl", mesher='gmsh')
+
+# STEP/IGES via Gmsh
+mesh = GmshMesher(target_edge_length=0.01).mesh_from_file("antenna.step")
+
 basis = compute_rwg_connectivity(mesh)
 # ... proceed with fill_impedance_matrix, etc.
 ```
@@ -310,6 +318,7 @@ The test suite is organized by module:
 | Test file | What it tests |
 |---|---|
 | `test_geometry.py` | Geometry primitives (vertices, bounding boxes) |
+| `test_gmsh_mesher.py` | Gmsh mesher: all 5 primitives, surface area, RWG, edge length control |
 | `test_mesh.py` | Mesh creation, edge extraction, statistics, validation |
 | `test_rwg_basis.py` | RWG basis computation, boundary edges, mesh density |
 | `test_greens.py` | Quadrature rules, Green's function, singularity extraction |

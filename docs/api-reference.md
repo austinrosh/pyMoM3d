@@ -6,7 +6,7 @@ Complete reference for all public modules, classes, and functions.
 
 ## `pyMoM3d.geometry` — Geometry Primitives
 
-All primitives share a common pattern: construct with physical dimensions, then call `to_trimesh()` to get a triangulated surface.
+All primitives share a common pattern: construct with physical dimensions, then pass to `GmshMesher.mesh_from_geometry()` (recommended) or call `to_trimesh()` for the legacy trimesh mesher.
 
 ### `RectangularPlate(width, height, center=(0,0,0))`
 
@@ -80,9 +80,30 @@ Edges, normals, areas, and edge lengths are computed automatically.
 - `validate()` -> dict — topological validation report
 - `Mesh.from_trimesh(trimesh_obj)` (classmethod) -> Mesh
 
+### `GmshMesher(target_edge_length=None, min_edge_length=None, max_edge_length=None, curvature_adapt=True, verbosity=0)`
+
+Recommended mesher. Uses the Gmsh Python API for high-quality surface meshing with element size control.
+
+- `target_edge_length` (float, optional): Target edge length in meters. Controls global mesh density.
+- `min_edge_length` (float, optional): Minimum edge length. Defaults to `target_edge_length / 5`.
+- `max_edge_length` (float, optional): Maximum edge length. Defaults to `target_edge_length * 2`.
+- `curvature_adapt` (bool): Enable curvature-based refinement. Default True.
+- `verbosity` (int): Gmsh output verbosity (0=silent). Default 0.
+
+**Methods:**
+- `mesh_from_geometry(geometry, **kwargs)` -> Mesh — auto-dispatches based on geometry primitive type
+- `mesh_sphere(radius, center, target_edge_length=None)` -> Mesh
+- `mesh_plate(width, height, center, target_edge_length=None)` -> Mesh
+- `mesh_cylinder(radius, height, center, target_edge_length=None)` -> Mesh
+- `mesh_cube(side_length, center, target_edge_length=None)` -> Mesh
+- `mesh_pyramid(base_size, height, center, target_edge_length=None)` -> Mesh
+- `mesh_from_file(path)` -> Mesh — load and mesh STL/STEP/IGES files
+
+Each method accepts an optional `target_edge_length` override that takes precedence over the instance-level setting.
+
 ### `PythonMesher(merge_vertices=True, remove_degenerate=True)`
 
-Converts `trimesh.Trimesh` objects into `Mesh` objects with cleaning.
+Legacy mesher. Converts `trimesh.Trimesh` objects into `Mesh` objects with cleaning.
 
 **Methods:**
 - `mesh_from_geometry(geometry, triangles=None)` -> Mesh
@@ -309,17 +330,21 @@ Result dataclass.
 - `save(path)` — save to `.npz`
 - `SimulationResult.load(path)` (classmethod) — load from `.npz`
 
-### `Simulation(config, geometry=None, mesh=None, subdivisions=2)`
+### `Simulation(config, geometry=None, mesh=None, subdivisions=2, mesher='trimesh', target_edge_length=None)`
 
-Provide either `geometry` (a primitive with `to_trimesh()`) or a pre-built `mesh`. The constructor meshes the geometry and computes RWG basis functions once.
+Provide either `geometry` (a primitive) or a pre-built `mesh`. The constructor meshes the geometry and computes RWG basis functions once.
+
+- `mesher` (str): `'trimesh'` (default) or `'gmsh'`. Selects the meshing backend.
+- `target_edge_length` (float, optional): Target edge length in meters (used with `mesher='gmsh'`).
+- `subdivisions` (int): Subdivision level (used with `mesher='trimesh'`).
 
 **Methods:**
 - `run()` -> SimulationResult — single-frequency solve
 - `sweep(frequencies)` -> list of SimulationResult — multi-frequency sweep (mesh reused)
 
-### `load_stl(path)` -> Mesh
+### `load_stl(path, mesher='trimesh')` -> Mesh
 
-Load a mesh from a `.stl` file via trimesh.
+Load a mesh from a `.stl` file. Pass `mesher='gmsh'` to use Gmsh instead of trimesh. With Gmsh, STEP and IGES files can also be loaded via `GmshMesher.mesh_from_file()`.
 
 ---
 
