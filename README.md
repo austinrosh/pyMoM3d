@@ -1,5 +1,9 @@
 # pyMoM3d
 
+![Version](https://img.shields.io/badge/version-0.2.0-blue)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 A Python implementation of the 3D Method of Moments (MoM) electromagnetic solver using RWG (Rao-Wilton-Glisson) basis functions on triangular surface meshes.
 
 pyMoM3d solves the Electric Field Integral Equation (EFIE) for induced surface currents on perfect electric conductors (PEC), then computes far-field radiation patterns, radar cross section (RCS), and input impedance.
