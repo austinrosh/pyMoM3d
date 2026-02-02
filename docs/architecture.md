@@ -45,22 +45,34 @@ from pyMoM3d import Sphere, PythonMesher
 mesh = PythonMesher().mesh_from_geometry(Sphere(radius=0.1).to_trimesh(subdivisions=2))
 ```
 
-### Loading from file
+### Feed-Line Meshing
 
-STL files (and with Gmsh: STEP, IGES) can be loaded directly:
+For strip dipole antennas, `GmshMesher.mesh_plate_with_feed()` creates a plate mesh with a forced transverse mesh line at the feed location. This ensures conformal edges exist at the feed point for accurate delta-gap excitation:
+
+```python
+mesh = GmshMesher(target_edge_length=0.005).mesh_plate_with_feed(
+    width=0.15, height=0.01, feed_x=0.0,
+)
+```
+
+### Loading from File
+
+STL and OBJ files (and with Gmsh: STEP, IGES) can be loaded directly:
 
 ```python
 from pyMoM3d import load_stl
-mesh = load_stl("my_model.stl")                  # via trimesh
-mesh = load_stl("my_model.stl", mesher='gmsh')   # via Gmsh
+mesh = load_stl("my_model.stl")                  # via trimesh (preserves original triangulation)
+mesh = load_stl("my_model.stl", mesher='gmsh')   # via Gmsh (remeshes with size control)
 ```
 
-With `GmshMesher`, you can also load STEP/IGES files:
+With `GmshMesher`, you can also load STEP/IGES files and control element size:
 
 ```python
 from pyMoM3d import GmshMesher
 mesh = GmshMesher(target_edge_length=0.01).mesh_from_file("antenna.step")
 ```
+
+Both `.stl` and `.obj` formats are supported by `trimesh.load()` and `gmsh.merge()`. The interactive example `stl_rcs_example.py` provides automatic mesh quality assessment and remesh recommendations when loading external files.
 
 ## Stage 2: Mesh (`mesh/`)
 
@@ -202,7 +214,7 @@ V = exc.compute_voltage_vector(basis, mesh, k)
 
 The voltage vector entry is: `V_m = integral f_m(r) . E_inc(r) dS`
 
-**Delta-gap feed** — models a voltage source across an edge (for antennas):
+**Delta-gap feed** — models a voltage source across a single edge (for antennas):
 
 ```python
 from pyMoM3d.mom.excitation import DeltaGapExcitation, find_nearest_edge
@@ -211,6 +223,20 @@ feed_idx = find_nearest_edge(mesh, basis, np.array([0.0, 0.0, 0.0]))
 exc = DeltaGapExcitation(basis_index=feed_idx, voltage=1.0)
 V = exc.compute_voltage_vector(basis, mesh, k)
 # V[feed_idx] = 1.0, all others = 0
+```
+
+**Strip delta-gap feed** — distributes the voltage across all transverse edges at the feed location. More accurate for strip dipoles:
+
+```python
+from pyMoM3d.mom.excitation import StripDeltaGapExcitation, find_feed_edges
+
+# Find all basis functions whose shared edge crosses x=0 transversely
+feed_indices = find_feed_edges(mesh, basis, feed_x=0.0)
+exc = StripDeltaGapExcitation(feed_basis_indices=feed_indices, voltage=1.0)
+V = exc.compute_voltage_vector(basis, mesh, k)
+
+# After solving, compute input impedance
+Z_in = exc.compute_input_impedance(I, basis, mesh)
 ```
 
 ### Solvers
@@ -299,6 +325,26 @@ from pyMoM3d.analysis import (
     compute_directivity,       # Directivity from far-field pattern
     compute_beamwidth_3dB,     # 3dB beamwidth
     mesh_convergence_study,    # Automated convergence study
+)
+```
+
+## Reporting System (`utils/`)
+
+The simulation pipeline supports progress reporting and post-run report generation.
+
+**Progress reporters** (`utils/reporter.py`):
+- `TerminalReporter` — writes human-readable progress to stderr with TTY-based in-place updates. Used by default.
+- `SilentReporter` — no-op reporter for tests or batch runs.
+- `RecordingReporter` — wraps another reporter while accumulating metadata for report generation.
+
+**Report generation** (`utils/report_writer.py`):
+When `SimulationConfig(enable_report=True)` is set, the `Simulation` class uses a `RecordingReporter` to track all stages and writes a structured text report to `results/simulation_info/` after the run completes. Reports include configuration, mesh statistics, RWG basis info, matrix assembly timing, solver results, warnings, and errors.
+
+```python
+config = SimulationConfig(
+    frequency=1e9, excitation=exc,
+    enable_report=True,          # enable report generation
+    report_dir='results/simulation_info',  # output directory (default)
 )
 ```
 

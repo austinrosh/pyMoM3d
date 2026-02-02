@@ -1,11 +1,10 @@
 """
 Example: PEC Sphere RCS — MoM vs Mie Series Validation
 
-Produces two plots:
-  Left:  Monostatic RCS (dBsm) vs frequency
-  Right: Bistatic RCS (dBsm) vs elevation angle at a single frequency
-
-Plus a 3D mesh visualization.
+Produces:
+  Figure 1 Left:  Monostatic RCS (dBsm) vs frequency
+  Figure 1 Right: Bistatic RCS (dBsm) vs elevation angle at a single frequency
+  Figure 2: Induced surface current density on the sphere
 """
 
 import sys
@@ -26,6 +25,7 @@ from pyMoM3d import (
     compute_far_field,
     compute_rcs,
     plot_mesh_3d,
+    plot_surface_current,
     eta0,
     c0,
 )
@@ -169,14 +169,16 @@ def main():
     fig.savefig(output_file, dpi=150, bbox_inches='tight')
     print(f"\nSaved plot to: {output_file}")
 
-    # Figure 2: Mesh visualization
+    # Figure 2: Induced surface current at bistatic frequency
     fig2 = plt.figure(figsize=(10, 8))
-    ax_mesh = fig2.add_subplot(111, projection='3d')
-    plot_mesh_3d(mesh, ax=ax_mesh, color='lightblue', alpha=0.6,
-                 edge_color='navy', edge_width=0.4)
-    ax_mesh.set_title(f'PEC Sphere Mesh: {stats["num_triangles"]} triangles, '
-                      f'{basis.num_basis} RWG basis functions')
-    output_file = os.path.join(images_dir, 'sphere_mesh.png')
+    ax_curr = fig2.add_subplot(111, projection='3d')
+    plot_surface_current(I_bi, basis, mesh, ax=ax_curr, cmap='hot',
+                         edge_color='gray', edge_width=0.3,
+                         title=(f'Induced surface current |J| on PEC sphere\n'
+                                f'f = {f_bistatic/1e9:.1f} GHz (ka={ka_bi:.2f}), '
+                                f'N = {basis.num_basis} basis functions'))
+    ax_curr.view_init(elev=30, azim=-60)
+    output_file = os.path.join(images_dir, 'sphere_surface_current.png')
     fig2.savefig(output_file, dpi=150, bbox_inches='tight')
     print(f"Saved plot to: {output_file}")
 

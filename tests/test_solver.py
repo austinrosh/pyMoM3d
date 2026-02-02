@@ -70,7 +70,8 @@ class TestDeltaGapExcitation:
         mesh, basis = _make_small_plate()
         exc = DeltaGapExcitation(basis_index=0, voltage=1.0)
         V = exc.compute_voltage_vector(basis, mesh, k=1.0)
-        assert V[0] == 1.0
+        # V[m] = voltage * l_m (RWG delta-gap convention)
+        assert V[0] == pytest.approx(1.0 * basis.edge_length[0])
         assert np.count_nonzero(V) == 1
 
 

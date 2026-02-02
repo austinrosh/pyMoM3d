@@ -28,6 +28,7 @@ def compute_far_field(
     theta: np.ndarray,
     phi: np.ndarray,
     quad_order: int = 4,
+    progress_callback=None,
 ) -> tuple:
     """Compute far-field E_theta and E_phi components.
 
@@ -88,7 +89,10 @@ def compute_far_field(
     # Radiation vector N(r_hat) = sum_n I_n * integral f_n(r') exp(+jk r_hat.r') dS'
     N_vec = np.zeros((M, 3), dtype=np.complex128)
 
-    for n in range(rwg_basis.num_basis):
+    _N_basis = rwg_basis.num_basis
+    for n in range(_N_basis):
+        if progress_callback is not None and _N_basis > 0:
+            progress_callback(n / _N_basis)
         I_n = I_coeffs[n]
         if abs(I_n) < 1e-30:
             continue

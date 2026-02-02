@@ -19,13 +19,17 @@ pytest tests/test_geometry.py
 pytest tests/test_mesh.py::test_rwg_connectivity
 
 # Run examples (each is standalone)
-python examples/plate_mesh_example.py
-python examples/sphere_example.py
+python examples/sphere_rcs_validation.py
+python examples/dipole_impedance_sweep.py
+python examples/plate_scattering.py
+python examples/simulation_driver_demo.py
+python examples/solver_performance.py
+python examples/stl_rcs_example.py    # requires tkinter
 ```
 
 ## Architecture
 
-The library follows a pipeline: **Geometry → Mesh → RWG Basis → (future: MoM solver)**
+The library follows a pipeline: **Geometry → Mesh → RWG Basis → Z-Fill → Solve → Post-Process**
 
 ### Core Modules
 
@@ -45,7 +49,23 @@ The library follows a pipeline: **Geometry → Mesh → RWG Basis → (future: M
 
 **`mesh/rwg_connectivity.py`** - `compute_rwg_connectivity()` computes RWG basis pairs from mesh topology
 
-**`visualization/mesh_plot.py`** - `plot_mesh_3d()` for 3D surface rendering, `plot_mesh()` for 2D
+**`mom/impedance.py`** - `fill_impedance_matrix()` assembles the EFIE impedance matrix with singularity extraction
+
+**`mom/excitation.py`** - Excitation sources: `PlaneWaveExcitation`, `DeltaGapExcitation`, `StripDeltaGapExcitation`, `find_feed_edges`
+
+**`mom/solver.py`** - `solve_direct()` (LU) and `solve_gmres()` (iterative with diagonal preconditioner)
+
+**`fields/far_field.py`** - `compute_far_field()` computes E_theta, E_phi from radiation integral
+
+**`fields/rcs.py`** - `compute_rcs()` and `compute_monostatic_rcs()` for RCS in dBsm
+
+**`simulation.py`** - `Simulation` class orchestrating the full pipeline; `load_stl()` for STL/OBJ loading
+
+**`visualization/mesh_plot.py`** - `plot_mesh_3d()` for 3D surface rendering, `plot_mesh()` for 2D, `plot_surface_current()` for current density heatmaps
+
+**`utils/reporter.py`** - `TerminalReporter`, `SilentReporter`, `RecordingReporter` for progress reporting
+
+**`utils/report_writer.py`** - `write_report()` generates structured text simulation reports
 
 ### Typical Workflow (Gmsh — recommended)
 
@@ -92,4 +112,4 @@ From `.cursorrules`:
 
 ## Project Status
 
-**Implemented**: Geometry primitives, mesh data structures, RWG connectivity, Gmsh-based meshing (recommended), trimesh-based meshing (legacy fallback), EFIE impedance matrix, excitation sources, solvers, far-field/RCS computation, Mie series validation, visualization, high-level simulation driver
+**Implemented**: Geometry primitives, mesh data structures, RWG connectivity, Gmsh-based meshing (recommended) with feed-line support, trimesh-based meshing (legacy fallback), STL/OBJ file import with quality assessment, EFIE impedance matrix with singularity extraction, excitation sources (plane wave, delta-gap, strip delta-gap), direct and iterative solvers, far-field/RCS computation, Mie series validation, surface current visualization, high-level simulation driver with reporting, interactive STL/OBJ example

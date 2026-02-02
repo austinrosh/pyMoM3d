@@ -14,6 +14,7 @@ env/
 
 # IDE / editor
 .cursorrules
+CLAUDE.md
 .idea/
 .vscode/
 *.swp
@@ -25,6 +26,7 @@ env/
 
 # Generated output (local only)
 images/
+results/
 
 # OS files
 .DS_Store
@@ -34,9 +36,13 @@ Thumbs.db
 .pytest_cache/
 htmlcov/
 .coverage
+models/
 
 # Notebooks
 .ipynb_checkpoints/
 
 # Local docs not for public repo
 docs/roadmap.md
+
+# Personal utility scripts
+examples/freq_finder.py

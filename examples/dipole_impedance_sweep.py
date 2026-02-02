@@ -29,21 +29,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from pyMoM3d import (
-    RectangularPlate,
     GmshMesher,
     compute_rwg_connectivity,
     Simulation,
     SimulationConfig,
+    TerminalReporter,
     plot_surface_current,
     compute_far_field,
     c0,
     eta0,
 )
-from pyMoM3d.mom.excitation import DeltaGapExcitation, find_nearest_edge
+from pyMoM3d.mom.excitation import StripDeltaGapExcitation, find_feed_edges
 from pyMoM3d.analysis.pattern_analysis import compute_directivity
 
 
 def main():
+    reporter = TerminalReporter()
+
     print("=" * 60)
     print("Dipole Impedance Sweep")
     print("=" * 60)
@@ -57,25 +59,30 @@ def main():
     print(f"Dipole width:  {dipole_width} m")
     print(f"Expected resonance: ~{c0 / (2 * dipole_length) / 1e9:.2f} GHz")
 
-    # --- Mesh ---
-    print("\n--- Meshing ---")
-    plate = RectangularPlate(dipole_length, dipole_width, center=(0, 0, 0))
+    # --- Mesh (with forced transverse edges at feed) ---
+    reporter.stage_start("mesh", geometry_type="RectangularPlate (strip dipole)")
     mesher = GmshMesher(target_edge_length=target_edge_length)
-    mesh = mesher.mesh_from_geometry(plate)
+    mesh = mesher.mesh_plate_with_feed(
+        width=dipole_length, height=dipole_width,
+        feed_x=0.0, center=(0, 0, 0))
     basis = compute_rwg_connectivity(mesh)
-
     stats = mesh.get_statistics()
-    print(f"Vertices:     {stats['num_vertices']}")
-    print(f"Triangles:    {stats['num_triangles']}")
-    print(f"RWG basis:    {basis.num_basis}")
+    reporter.stage_end(
+        "mesh",
+        num_triangles=stats['num_triangles'],
+        num_vertices=stats['num_vertices'],
+        mean_edge=stats['mean_edge_length'],
+    )
 
-    # --- Find feed edge ---
-    feed_point = np.array([0.0, 0.0, 0.0])
-    feed_idx = find_nearest_edge(mesh, basis, feed_point)
-    feed_edge = mesh.edges[basis.edge_index[feed_idx]]
-    feed_midpoint = 0.5 * (mesh.vertices[feed_edge[0]] + mesh.vertices[feed_edge[1]])
-    print(f"Feed basis index: {feed_idx}")
-    print(f"Feed edge midpoint: ({feed_midpoint[0]:.4f}, {feed_midpoint[1]:.4f}, {feed_midpoint[2]:.4f})")
+    # --- Find feed edges (all transverse edges at x=0) ---
+    feed_indices = find_feed_edges(mesh, basis, feed_x=0.0)
+    print(f"Feed edges:   {len(feed_indices)} transverse edges at x=0")
+    for idx in feed_indices:
+        e = mesh.edges[basis.edge_index[idx]]
+        mid = 0.5 * (mesh.vertices[e[0]] + mesh.vertices[e[1]])
+        d = mesh.vertices[e[1]] - mesh.vertices[e[0]]
+        print(f"  basis {idx}: mid=({mid[0]:.4f},{mid[1]:.4f},{mid[2]:.4f}), "
+              f"len={np.linalg.norm(d):.4f} m")
 
     # --- Frequency sweep ---
     freq_start = 0.5e9
@@ -83,11 +90,9 @@ def main():
     n_freqs = 21
     frequencies = np.linspace(freq_start, freq_stop, n_freqs)
 
-    print(f"\n--- Frequency sweep: {freq_start/1e9:.1f} - {freq_stop/1e9:.1f} GHz, {n_freqs} points ---")
-
-    exc = DeltaGapExcitation(basis_index=feed_idx, voltage=1.0)
+    exc = StripDeltaGapExcitation(feed_basis_indices=feed_indices, voltage=1.0)
     config = SimulationConfig(frequency=frequencies[0], excitation=exc, quad_order=4)
-    sim = Simulation(config, mesh=mesh)
+    sim = Simulation(config, mesh=mesh, reporter=reporter)
 
     results = sim.sweep(frequencies.tolist())
 
@@ -102,23 +107,28 @@ def main():
     for i, f in enumerate(frequencies):
         print(f"  {f/1e9:8.3f}       {R_in[i]:12.4f}   {X_in[i]:12.4f}")
 
-    # Find resonance
+    # Find resonance: interpolate to exact X_in = 0 crossing
     valid = np.isfinite(X_in) & np.isfinite(R_in)
-    idx_res = 0
-    if np.any(valid):
-        valid_X = X_in[valid]
-        sign_changes = np.where(np.diff(np.sign(valid_X.real)))[0]
-        if len(sign_changes) > 0:
-            idx_res = np.where(valid)[0][sign_changes[0]]
-            if abs(X_in[idx_res]) > abs(X_in[idx_res + 1]):
-                idx_res = idx_res + 1
-        else:
-            idx_res = np.where(valid)[0][np.argmax(R_in[valid])]
-    f_res = frequencies[idx_res]
-    Z_res = Z_in[idx_res]
-    print(f"\nNearest to resonance: f = {f_res/1e9:.3f} GHz")
-    print(f"Z_in at resonance:   {Z_res.real:.4f} + j{Z_res.imag:.4f} Ohm")
+    sign_changes = np.where(np.diff(np.sign(X_in[valid].real)))[0]
+    if len(sign_changes) > 0:
+        vi = np.where(valid)[0]
+        i_lo = vi[sign_changes[0]]
+        i_hi = i_lo + 1
+        # Linear interpolation fraction for X_in = 0
+        alpha = -X_in[i_lo].real / (X_in[i_hi].real - X_in[i_lo].real)
+        f_res = frequencies[i_lo] + alpha * (frequencies[i_hi] - frequencies[i_lo])
+        R_res = R_in[i_lo] + alpha * (R_in[i_hi] - R_in[i_lo])
+        idx_res = i_lo if abs(X_in[i_lo]) < abs(X_in[i_hi]) else i_hi
+    else:
+        # Fallback: peak R_in
+        idx_res = np.where(valid)[0][np.argmax(R_in[valid])]
+        f_res = frequencies[idx_res]
+        R_res = R_in[idx_res]
 
+    print(f"\nResonance (X_in=0): f = {f_res/1e9:.3f} GHz")
+    print(f"R_in at resonance:  {R_res:.4f} Ohm")
+
+    # Use nearest sampled point for current distribution / far-field
     I_res = results[idx_res].I_coefficients
 
     # --- S11 ---
@@ -144,7 +154,7 @@ def main():
     sort_idx = trans_idx[np.argsort(edge_x_pos[trans_idx])]
 
     # --- Far-field radiation pattern at resonance ---
-    print("\n--- Radiation pattern at resonance ---")
+    reporter.stage_start("far_field", num_angles=181)
     k_res = 2.0 * np.pi * f_res / c0
 
     theta_half = np.linspace(0.001, np.pi - 0.001, 181)
@@ -158,6 +168,7 @@ def main():
     E_th_h, E_ph_h = compute_far_field(I_res, basis, mesh, k_res, eta0,
                                         theta_half, np.full_like(theta_half, np.pi / 2))
     gain_h = np.abs(E_th_h)**2 + np.abs(E_ph_h)**2
+    reporter.stage_end("far_field", num_angles=181)
 
     # --- Compute directivity on a full (theta, phi) grid ---
     n_th_grid = 91
@@ -182,6 +193,11 @@ def main():
     gain_e_dBi = 10.0 * np.log10(np.maximum(gain_e / gain_max, 1e-30)) + D_max_dBi
     gain_h_dBi = 10.0 * np.log10(np.maximum(gain_h / gain_max, 1e-30)) + D_max_dBi
 
+    # --- Resonance annotation strings ---
+    f_res_ghz = f_res / 1e9
+    z_res_label = (f'$f_{{res}}$ = {f_res_ghz:.3f} GHz ($X_{{in}}$=0)\n'
+                   f'$R_{{in}}$ = {R_res:.1f} $\\Omega$')
+
     # --- Plots ---
     images_dir = os.path.join(os.path.dirname(__file__), '..', 'images')
     os.makedirs(images_dir, exist_ok=True)
@@ -190,29 +206,52 @@ def main():
     fig1, axes = plt.subplots(1, 3, figsize=(16, 5))
     freq_GHz = frequencies / 1e9
 
+    # Interpolate S11 at resonance
+    S11_res = (R_res - Z0) / (R_res + Z0)  # X_in=0, so Z_in is purely real
+    S11_res_dB = 20.0 * np.log10(max(abs(S11_res), 1e-30))
+
     ax = axes[0]
     ax.plot(freq_GHz, R_in, 'b-o', linewidth=1.5, markersize=3)
-    ax.axvline(f_res / 1e9, color='gray', linestyle='--', alpha=0.5, label='Resonance')
+    ax.axvline(f_res_ghz, color='gray', linestyle='--', alpha=0.5)
+    ax.plot(f_res_ghz, R_res, 'k*', markersize=10, zorder=5)
+    ax.annotate(z_res_label,
+                xy=(f_res_ghz, R_res), xycoords='data',
+                xytext=(15, 15), textcoords='offset points',
+                fontsize=8, ha='left',
+                bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.8),
+                arrowprops=dict(arrowstyle='->', color='black'))
     ax.set_xlabel('Frequency (GHz)')
     ax.set_ylabel(r'$R_{in}$ ($\Omega$)')
     ax.set_title('Input Resistance')
-    ax.legend()
     ax.grid(True, alpha=0.3)
 
     ax = axes[1]
     ax.plot(freq_GHz, X_in, 'r-o', linewidth=1.5, markersize=3)
     ax.axhline(0, color='k', linestyle=':', alpha=0.5)
-    ax.axvline(f_res / 1e9, color='gray', linestyle='--', alpha=0.5, label='Resonance')
+    ax.axvline(f_res_ghz, color='gray', linestyle='--', alpha=0.5)
+    ax.plot(f_res_ghz, 0.0, 'k*', markersize=10, zorder=5)
+    ax.annotate(z_res_label,
+                xy=(f_res_ghz, 0.0), xycoords='data',
+                xytext=(15, -25), textcoords='offset points',
+                fontsize=8, ha='left',
+                bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.8),
+                arrowprops=dict(arrowstyle='->', color='black'))
     ax.set_xlabel('Frequency (GHz)')
     ax.set_ylabel(r'$X_{in}$ ($\Omega$)')
     ax.set_title('Input Reactance')
-    ax.legend()
     ax.grid(True, alpha=0.3)
 
     ax = axes[2]
     ax.plot(freq_GHz, S11_dB, 'g-o', linewidth=1.5, markersize=3)
     ax.axhline(-10, color='k', linestyle='--', alpha=0.5, label='-10 dB')
-    ax.axvline(f_res / 1e9, color='gray', linestyle='--', alpha=0.5, label='Resonance')
+    ax.axvline(f_res_ghz, color='gray', linestyle='--', alpha=0.5)
+    ax.plot(f_res_ghz, S11_res_dB, 'k*', markersize=10, zorder=5)
+    ax.annotate(f'$f_{{res}}$ = {f_res_ghz:.3f} GHz\n|S11| = {S11_res_dB:.1f} dB',
+                xy=(f_res_ghz, S11_res_dB), xycoords='data',
+                xytext=(15, 15), textcoords='offset points',
+                fontsize=8, ha='left',
+                bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.8),
+                arrowprops=dict(arrowstyle='->', color='black'))
     ax.set_xlabel('Frequency (GHz)')
     ax.set_ylabel('|S11| (dB)')
     ax.set_title(f'Return Loss (Z0={Z0:.0f} $\\Omega$)')
@@ -226,8 +265,8 @@ def main():
     fig1.savefig(output_file, dpi=150, bbox_inches='tight')
     print(f"\nSaved plot to: {output_file}")
 
-    # Figure 2: Current distribution along dipole at resonance
-    fig2, (ax_mag, ax_phase) = plt.subplots(1, 2, figsize=(14, 5))
+    # Figure 2: Current magnitude along dipole at resonance
+    fig2, ax_mag = plt.subplots(figsize=(8, 5))
 
     x_sorted = edge_x_pos[sort_idx] * 1000  # mm
     I_sorted = I_res[sort_idx]
@@ -235,16 +274,19 @@ def main():
     ax_mag.plot(x_sorted, np.abs(I_sorted), 'b-o', linewidth=1.5, markersize=3)
     ax_mag.set_xlabel('Position along dipole (mm)')
     ax_mag.set_ylabel('|I_n| (A)')
-    ax_mag.set_title(f'Current magnitude at resonance ({f_res/1e9:.2f} GHz)')
+    ax_mag.set_title(f'Current magnitude at resonance, f = {f_res/1e9:.3f} GHz')
     ax_mag.grid(True, alpha=0.3)
 
-    ax_phase.plot(x_sorted, np.degrees(np.angle(I_sorted)), 'r-o', linewidth=1.5, markersize=3)
-    ax_phase.set_xlabel('Position along dipole (mm)')
-    ax_phase.set_ylabel('Phase (deg)')
-    ax_phase.set_title('Current phase at resonance')
-    ax_phase.grid(True, alpha=0.3)
-
-    fig2.suptitle(f'Current distribution at resonance, f = {f_res/1e9:.2f} GHz', fontsize=13)
+    # Annotate the feed-point spike
+    feed_mask = np.isin(sort_idx, feed_indices)
+    if np.any(feed_mask):
+        i_feed = np.where(feed_mask)[0][0]
+        ax_mag.annotate('delta-gap feed',
+                        xy=(x_sorted[i_feed], np.abs(I_sorted[i_feed])),
+                        xytext=(15, 5), textcoords='offset points',
+                        fontsize=8, ha='left',
+                        bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.8),
+                        arrowprops=dict(arrowstyle='->', color='black'))
     fig2.tight_layout()
     output_file = os.path.join(images_dir, 'dipole_current_distribution.png')
     fig2.savefig(output_file, dpi=150, bbox_inches='tight')

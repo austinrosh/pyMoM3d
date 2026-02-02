@@ -16,11 +16,11 @@ Each example prints progress to the terminal and saves plots to `images/`.
 
 **What it does:**
 
-1. Creates an icosphere mesh (`Sphere(radius=0.1)`, subdivisions=2 -> 320 triangles, 480 basis functions)
-2. Sets frequency to 1.5 GHz (ka ~ pi, wavelength ~ 0.2 m)
-3. Fills the impedance matrix and solves with a -z propagating, x-polarized plane wave
+1. Creates a sphere mesh using `GmshMesher(target_edge_length=0.02)` for element size control
+2. Sweeps monostatic RCS over 0.5–2.0 GHz (16 frequencies)
+3. At a fixed bistatic frequency (1.0 GHz), fills the impedance matrix and solves with a -z propagating, x-polarized plane wave
 4. Computes bistatic RCS in the xz-plane (phi=0, theta from 0 to 180 deg)
-5. Compares against `mie_rcs_pec_sphere(ka, theta)`
+5. Compares both monostatic and bistatic RCS against exact Mie series solutions
 
 **Key output:**
 - Impedance matrix condition number (should be ~10-100)
@@ -30,8 +30,7 @@ Each example prints progress to the terminal and saves plots to `images/`.
 
 | File | Content |
 |---|---|
-| `sphere_rcs_validation.png` | Bistatic RCS (MoM vs Mie) and current coefficient bar chart |
-| `sphere_mesh.png` | 3D mesh visualization |
+| `sphere_rcs_validation.png` | Monostatic RCS vs frequency (left) and bistatic RCS vs angle (right), both MoM vs Mie |
 | `sphere_surface_current.png` | Surface current density heatmap |
 
 **Relevant code pattern — manual pipeline (Gmsh):**
@@ -59,7 +58,7 @@ rcs_mie = mie_rcs_pec_sphere(ka, theta)
 ```
 
 **Tips:**
-- Increase `subdivisions` (3 or 4) for better Mie agreement at the cost of runtime
+- Decrease `target_edge_length` for better Mie agreement at the cost of runtime
 - ka ~ 1 is the simplest validation regime; larger ka requires finer meshes
 
 ---
@@ -211,6 +210,65 @@ loaded = SimulationResult.load("my_result.npz")
 
 ---
 
+## 5. Solver Performance Benchmark (`solver_performance.py`)
+
+**Purpose:** Benchmarks impedance matrix assembly and solver execution time across different mesh sizes to characterize scaling behavior.
+
+```bash
+PYTHONPATH=src python examples/solver_performance.py
+```
+
+---
+
+## 6. STL/OBJ RCS Example (`stl_rcs_example.py`)
+
+**Purpose:** Interactive workflow for loading an external mesh file (`.stl` or `.obj`), inspecting it, assessing mesh quality, optionally remeshing, and computing bistatic RCS and surface current.
+
+**Requires:** `tkinter` (for the file selection dialog).
+
+**What it does:**
+
+1. Opens a native file dialog to select a `.stl` or `.obj` file
+2. Loads the mesh via trimesh (preserving the original triangulation)
+3. Prints mesh statistics: triangle/vertex/edge counts, edge lengths, elements per wavelength
+4. Displays the imported mesh interactively via `plot_mesh_3d` (close window to continue)
+5. Assesses mesh quality:
+   - Elements/wavelength < 10 → **must remesh** (automatic)
+   - Edge ratio > 5.0 → **recommend remesh** (prompts user)
+   - Degenerate triangles → **must remesh**
+   - Non-manifold edges → **warn** (cannot fix by remeshing)
+6. If remeshing: uses `GmshMesher.mesh_from_file()` with `target_edge_length = min(lambda/15, mean_edge)`, then shows the remeshed model
+7. For large meshes (>2000 estimated basis functions), recommends GMRES over direct LU and prompts for solver choice
+8. Runs the solve via `Simulation(config, mesh=mesh)` with `enable_report=True`
+9. Computes bistatic RCS (361 points, theta 0→pi, phi=0) and saves:
+   - Polar RCS plot to `images/<name>_rcs_bistatic.png`
+   - 3D surface current plot to `images/<name>_surface_current.png`
+
+**Generated plots** (`images/`):
+
+| File | Content |
+|---|---|
+| `<name>_rcs_bistatic.png` | Polar bistatic RCS plot |
+| `<name>_surface_current.png` | 3D surface current density heatmap |
+
+**Relevant code pattern — solving with a pre-built mesh:**
+
+```python
+from pyMoM3d import Simulation, SimulationConfig, PlaneWaveExcitation
+
+# Load and optionally remesh
+mesh = GmshMesher(target_edge_length=0.02).mesh_from_file("object.stl")
+
+# Solve — pass mesh directly, no geometry needed
+exc = PlaneWaveExcitation(E0=np.array([1, 0, 0]), k_hat=np.array([0, 0, -1]))
+config = SimulationConfig(frequency=1e9, excitation=exc, enable_report=True)
+sim = Simulation(config, mesh=mesh)
+result = sim.run()
+basis = sim.basis  # access basis functions after construction
+```
+
+---
+
 ## Writing Your Own Simulations
 
 ### Template: Scattering Problem
@@ -296,10 +354,11 @@ E_th, E_ph = compute_far_field(
 ```python
 from pyMoM3d import load_stl, GmshMesher, compute_rwg_connectivity
 
-# STL via trimesh (default)
+# STL or OBJ via trimesh (preserves original triangulation)
 mesh = load_stl("my_antenna.stl")
+mesh = load_stl("my_antenna.obj")
 
-# STL via Gmsh (with remeshing control)
+# STL/OBJ via Gmsh (with remeshing control)
 mesh = load_stl("my_antenna.stl", mesher='gmsh')
 
 # STEP/IGES via Gmsh

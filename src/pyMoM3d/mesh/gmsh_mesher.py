@@ -391,6 +391,70 @@ class GmshMesher:
 
         return mesh
 
+    def mesh_plate_with_feed(
+        self,
+        width: float,
+        height: float,
+        feed_x: float = 0.0,
+        center: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+        target_edge_length: Optional[float] = None,
+    ) -> Mesh:
+        """
+        Generate a plate mesh with a forced transverse mesh line at feed_x.
+
+        Splits the plate into two halves joined at x=feed_x, ensuring
+        conformal transverse edges exist at the feed location. This is
+        essential for delta-gap feed models on strip dipoles.
+
+        Parameters
+        ----------
+        width : float
+            Width along x-axis in meters.
+        height : float
+            Height along y-axis in meters.
+        feed_x : float
+            x-coordinate of the feed line (default 0.0).
+        center : tuple of float
+            Center coordinates (x, y, z).
+        target_edge_length : float, optional
+            Override instance-level target edge length.
+
+        Returns
+        -------
+        mesh : Mesh
+        """
+        self._init_gmsh()
+        try:
+            if target_edge_length is not None:
+                old = self.target_edge_length
+                self.target_edge_length = target_edge_length
+
+            cx, cy, cz = center
+            x0 = cx - width / 2.0
+            y0 = cy - height / 2.0
+
+            # Create two rectangles sharing the feed line
+            w_left = feed_x - x0
+            w_right = (x0 + width) - feed_x
+
+            rect_left = gmsh.model.occ.addRectangle(x0, y0, cz, w_left, height)
+            rect_right = gmsh.model.occ.addRectangle(feed_x, y0, cz, w_right, height)
+
+            # Fragment to merge shared boundary — ensures conformal mesh
+            gmsh.model.occ.fragment(
+                [(2, rect_left)], [(2, rect_right)]
+            )
+
+            mesh = self._generate_mesh()
+
+            if target_edge_length is not None:
+                self.target_edge_length = old
+        except Exception:
+            self._finalize_gmsh()
+            raise
+
+        return mesh
+
     def mesh_from_geometry(self, geometry, **kwargs) -> Mesh:
         """
         Generate a mesh from a pyMoM3d geometry primitive.

@@ -97,7 +97,8 @@ Recommended mesher. Uses the Gmsh Python API for high-quality surface meshing wi
 - `mesh_cylinder(radius, height, center, target_edge_length=None)` -> Mesh
 - `mesh_cube(side_length, center, target_edge_length=None)` -> Mesh
 - `mesh_pyramid(base_size, height, center, target_edge_length=None)` -> Mesh
-- `mesh_from_file(path)` -> Mesh — load and mesh STL/STEP/IGES files
+- `mesh_plate_with_feed(width, height, feed_x=0.0, center=(0,0,0), target_edge_length=None)` -> Mesh — plate with forced transverse mesh line at `feed_x` for conformal delta-gap feed edges
+- `mesh_from_file(path)` -> Mesh — load and mesh STL/OBJ/STEP/IGES files
 
 Each method accepts an optional `target_edge_length` override that takes precedence over the instance-level setting.
 
@@ -184,6 +185,21 @@ Delta-gap voltage source at a single edge.
 
 **Methods:**
 - `compute_voltage_vector(rwg_basis, mesh, k)` -> `ndarray (N,) complex128`
+
+### `StripDeltaGapExcitation(feed_basis_indices, voltage=1.0)`
+
+Delta-gap excitation distributed across multiple transverse edges at the feed location. More physical than a single-edge delta gap for strip dipoles.
+
+- `feed_basis_indices` (list of int): Basis function indices crossing the feed line.
+- `voltage` (complex): Applied voltage (V).
+
+**Methods:**
+- `compute_voltage_vector(rwg_basis, mesh, k)` -> `ndarray (N,) complex128`
+- `compute_input_impedance(I_coeffs, rwg_basis, mesh)` -> complex — computes Z_in from the solved current coefficients
+
+### `find_feed_edges(mesh, rwg_basis, feed_x, tol=None)` -> list of int
+
+Find all interior basis functions whose shared edge crosses `x=feed_x` transversely. Used with `StripDeltaGapExcitation`. The `tol` parameter defaults to twice the minimum edge length.
 
 ### `find_nearest_edge(mesh, rwg_basis, point)` -> int
 
@@ -318,9 +334,12 @@ Compute `|J|` at each triangle centroid. Useful for exporting current data witho
 
 ## `pyMoM3d.simulation` — High-Level Driver
 
-### `SimulationConfig(frequency, excitation, solver_type='direct', quad_order=4, near_threshold=0.2)`
+### `SimulationConfig(frequency, excitation, solver_type='direct', quad_order=4, near_threshold=0.2, enable_report=False, report_dir='results/simulation_info')`
 
 Configuration dataclass.
+
+- `enable_report` (bool): If True, generate a text report after the simulation completes. Default False.
+- `report_dir` (str): Directory for report output. Default `'results/simulation_info'`.
 
 ### `SimulationResult(frequency, I_coefficients, Z_input=None, condition_number=None)`
 
@@ -330,13 +349,14 @@ Result dataclass.
 - `save(path)` — save to `.npz`
 - `SimulationResult.load(path)` (classmethod) — load from `.npz`
 
-### `Simulation(config, geometry=None, mesh=None, subdivisions=2, mesher='trimesh', target_edge_length=None)`
+### `Simulation(config, geometry=None, mesh=None, subdivisions=2, mesher='trimesh', target_edge_length=None, reporter=None)`
 
 Provide either `geometry` (a primitive) or a pre-built `mesh`. The constructor meshes the geometry and computes RWG basis functions once.
 
 - `mesher` (str): `'trimesh'` (default) or `'gmsh'`. Selects the meshing backend.
 - `target_edge_length` (float, optional): Target edge length in meters (used with `mesher='gmsh'`).
 - `subdivisions` (int): Subdivision level (used with `mesher='trimesh'`).
+- `reporter` (object, optional): Progress reporter. Defaults to `TerminalReporter`. Pass `SilentReporter()` to suppress output.
 
 **Methods:**
 - `run()` -> SimulationResult — single-frequency solve
@@ -344,11 +364,13 @@ Provide either `geometry` (a primitive) or a pre-built `mesh`. The constructor m
 
 ### `load_stl(path, mesher='trimesh')` -> Mesh
 
-Load a mesh from a `.stl` file. Pass `mesher='gmsh'` to use Gmsh instead of trimesh. With Gmsh, STEP and IGES files can also be loaded via `GmshMesher.mesh_from_file()`.
+Load a mesh from an `.stl` or `.obj` file. Pass `mesher='gmsh'` to use Gmsh instead of trimesh. With Gmsh, STEP and IGES files can also be loaded via `GmshMesher.mesh_from_file()`.
 
 ---
 
-## `pyMoM3d.utils` — Constants
+## `pyMoM3d.utils` — Constants and Reporting
+
+### Constants
 
 | Name | Value | Description |
 |---|---|---|
@@ -356,3 +378,32 @@ Load a mesh from a `.stl` file. Pass `mesher='gmsh'` to use Gmsh instead of trim
 | `mu0` | 4*pi*1e-7 | Permeability of free space (H/m) |
 | `eps0` | 1/(mu0*c0^2) | Permittivity of free space (F/m) |
 | `eta0` | mu0*c0 ≈ 376.73 | Intrinsic impedance (Ohms) |
+
+### Progress Reporters (`utils/reporter.py`)
+
+#### `TerminalReporter(stream=sys.stderr)`
+
+Default reporter. Writes human-readable progress to a stream with TTY-based in-place line updates.
+
+**Methods:**
+- `stage_start(name, **kwargs)` — announce the start of a stage (mesh, rwg, z_fill, solve, etc.)
+- `stage_progress(name, fraction, **kwargs)` — update in-place progress for a stage
+- `stage_end(name, **kwargs)` — announce completion with summary stats
+- `warning(msg)`, `error(msg)` — print warnings/errors
+- `finish()` — print final summary
+
+#### `SilentReporter()`
+
+No-op reporter. All methods are no-ops. Use for tests or batch runs.
+
+#### `RecordingReporter(inner_reporter)`
+
+Wraps another reporter, forwarding all calls while accumulating a `metadata` dict. Used internally by `Simulation` when `enable_report=True`.
+
+- `metadata` (dict): Accumulated data from all stages, used by `write_report()`.
+
+### Report Writer (`utils/report_writer.py`)
+
+#### `write_report(metadata, path)`
+
+Write a structured plain-text simulation report to `path`. Called automatically by `Simulation` when reporting is enabled. The report includes: configuration, mesh statistics, RWG basis info, Z-matrix assembly timing and memory, solver results, condition number, warnings, and errors.

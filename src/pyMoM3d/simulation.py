@@ -5,8 +5,11 @@ that orchestrate the full MoM pipeline: mesh -> basis -> Z-fill -> solve -> post
 """
 
 import logging
+import os
+import time as _time
 import numpy as np
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from .mesh.mesh_data import Mesh
@@ -19,6 +22,8 @@ from .mom.solver import solve_direct, solve_gmres
 from .fields.far_field import compute_far_field
 from .fields.rcs import compute_rcs
 from .utils.constants import c0, eta0
+from .utils.reporter import TerminalReporter, SilentReporter, RecordingReporter
+from .utils.report_writer import write_report
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +50,8 @@ class SimulationConfig:
     solver_type: str = 'direct'
     quad_order: int = 4
     near_threshold: float = 0.2
+    enable_report: bool = False
+    report_dir: str = 'results/simulation_info'
 
 
 @dataclass
@@ -107,6 +114,9 @@ class Simulation:
         Mesher backend: 'trimesh' (default) or 'gmsh'.
     target_edge_length : float, optional
         Target edge length in meters (used with mesher='gmsh').
+    reporter : object, optional
+        Progress reporter. Defaults to ``TerminalReporter``.
+        Pass ``SilentReporter()`` to suppress output.
     """
 
     def __init__(
@@ -117,26 +127,88 @@ class Simulation:
         subdivisions: int = 2,
         mesher: str = 'trimesh',
         target_edge_length: Optional[float] = None,
+        reporter=None,
     ):
         self.config = config
         self.geometry = geometry
         self.subdivisions = subdivisions
+        self._start_time = _time.monotonic()
 
+        inner_reporter = reporter if reporter is not None else TerminalReporter()
+        if config.enable_report:
+            self.reporter = RecordingReporter(inner_reporter)
+            # Seed metadata with config info
+            wavelength = c0 / config.frequency if config.frequency > 0 else None
+            exc = config.excitation
+            exc_str = type(exc).__name__
+            if hasattr(exc, 'E0') and hasattr(exc, 'k_hat'):
+                exc_str += f" (E0={list(exc.E0)}, k_hat={list(exc.k_hat)})"
+            elif hasattr(exc, 'voltage'):
+                exc_str += f" (V={exc.voltage})"
+            self.reporter.metadata["config"] = {
+                "frequency": config.frequency,
+                "wavelength": wavelength,
+                "excitation": exc_str,
+                "solver_type": config.solver_type,
+                "quad_order": config.quad_order,
+                "near_threshold": config.near_threshold,
+            }
+            geom_type = type(geometry).__name__ if geometry else "custom"
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            self.reporter.metadata["run_id"] = f"{geom_type.lower()}_{ts}"
+            self.reporter.metadata["timestamp"] = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%S UTC"
+            )
+            from . import __version__
+            self.reporter.metadata["version"] = __version__
+        else:
+            self.reporter = inner_reporter
+
+        # --- Mesh generation ---
         if mesh is not None:
             self.mesh = mesh
         elif geometry is not None:
-            if mesher == 'gmsh':
-                from .mesh.gmsh_mesher import GmshMesher
-                gmsh_mesher = GmshMesher(target_edge_length=target_edge_length)
-                self.mesh = gmsh_mesher.mesh_from_geometry(geometry)
-            else:
-                trimesh_mesher = PythonMesher()
-                trimesh_obj = geometry.to_trimesh(subdivisions=subdivisions)
-                self.mesh = trimesh_mesher.mesh_from_geometry(trimesh_obj)
+            geom_type = type(geometry).__name__
+            self.reporter.stage_start("mesh", geometry_type=geom_type)
+            try:
+                if mesher == 'gmsh':
+                    from .mesh.gmsh_mesher import GmshMesher
+                    gmsh_mesher = GmshMesher(target_edge_length=target_edge_length)
+                    self.mesh = gmsh_mesher.mesh_from_geometry(geometry)
+                else:
+                    trimesh_mesher = PythonMesher()
+                    trimesh_obj = geometry.to_trimesh(subdivisions=subdivisions)
+                    self.mesh = trimesh_mesher.mesh_from_geometry(trimesh_obj)
+            except Exception:
+                self.reporter.error("Mesh generation failed")
+                raise
+            stats = self.mesh.get_statistics()
+            self.reporter.stage_end(
+                "mesh",
+                num_triangles=stats['num_triangles'],
+                num_vertices=stats['num_vertices'],
+                mean_edge=stats['mean_edge_length'],
+            )
+            if isinstance(self.reporter, RecordingReporter):
+                self.reporter.metadata.setdefault("mesh", {})
+                self.reporter.metadata["mesh"]["mesher"] = mesher
+                self.reporter.metadata["mesh"]["target_edge_length"] = target_edge_length
         else:
             raise ValueError("Either geometry or mesh must be provided")
 
+        # --- RWG connectivity ---
+        self.reporter.stage_start("rwg")
         self.basis = compute_rwg_connectivity(self.mesh)
+        num_interior = self.basis.num_basis
+        # Count boundary edges
+        num_boundary = 0
+        if self.mesh.rwg_pairs is not None:
+            num_boundary = int(np.sum(self.mesh.rwg_pairs[:, 1] == -1))
+        self.reporter.stage_end("rwg", num_interior=num_interior, num_boundary=num_boundary)
+
+        if num_interior == 0:
+            self.reporter.error("No RWG basis functions found. Check mesh connectivity.")
+
         self._Z_cache = {}
 
     def run(self) -> SimulationResult:
@@ -146,7 +218,19 @@ class Simulation:
         -------
         result : SimulationResult
         """
-        return self._solve_at_frequency(self.config.frequency)
+        status = "COMPLETED"
+        result = None
+        try:
+            result = self._solve_at_frequency(self.config.frequency)
+            return result
+        except KeyboardInterrupt:
+            status = "INTERRUPTED"
+            raise
+        except Exception:
+            status = "FAILED"
+            raise
+        finally:
+            self._write_report(status, [result] if result else [])
 
     def sweep(self, frequencies: List[float]) -> List[SimulationResult]:
         """Run simulation at multiple frequencies.
@@ -162,38 +246,139 @@ class Simulation:
         -------
         results : list of SimulationResult
         """
-        return [self._solve_at_frequency(f) for f in frequencies]
+        K = len(frequencies)
+        f_min_ghz = frequencies[0] / 1e9 if K > 0 else 0
+        f_max_ghz = frequencies[-1] / 1e9 if K > 0 else 0
+        self.reporter.stage_start(
+            "sweep", num_freqs=K, f_min_ghz=f"{f_min_ghz:.2f}",
+            f_max_ghz=f"{f_max_ghz:.2f}",
+        )
+        results = []
+        status = "COMPLETED"
+        try:
+            for i, f in enumerate(frequencies):
+                self.reporter.stage_start(
+                    "sweep_freq", index=i + 1, total=K,
+                    freq_ghz=f"{f/1e9:.2f}",
+                )
+                results.append(self._solve_at_frequency(f))
+        except KeyboardInterrupt:
+            status = f"INTERRUPTED ({len(results)}/{K} completed)"
+            self.reporter.warning("Sweep interrupted by user")
+            self.reporter.finish()
+            self._write_report(status, results)
+            raise
+        except Exception:
+            status = "FAILED"
+            self._write_report(status, results)
+            raise
+        self.reporter.stage_end("sweep", num_freqs=K)
+        self._write_report(status, results)
+        return results
+
+    def _write_report(self, status, results):
+        """Write report file if reporting is enabled."""
+        if not isinstance(self.reporter, RecordingReporter):
+            return
+        md = self.reporter.metadata
+        md["status"] = status
+        md["total_time"] = _time.monotonic() - self._start_time
+        if results:
+            last = results[-1]
+            if last is not None and last.Z_input is not None:
+                md.setdefault("results", {})["Z_input"] = last.Z_input
+        run_id = md.get("run_id", "unknown")
+        path = os.path.join(self.config.report_dir, f"{run_id}.txt")
+        write_report(md, path)
 
     def _solve_at_frequency(self, frequency: float) -> SimulationResult:
         k = 2.0 * np.pi * frequency / c0
+        N = self.basis.num_basis
 
         logger.info(f"Solving at f={frequency:.4g} Hz (k={k:.4g} rad/m), "
-                     f"N={self.basis.num_basis} unknowns")
+                     f"N={N} unknowns")
 
-        self.mesh.check_density(frequency)
+        # Mesh density check via reporter
+        from .utils.constants import c0 as _c0
+        wavelength = _c0 / frequency
+        mean_edge = float(np.mean(self.mesh.edge_lengths))
+        if mean_edge > wavelength / 10.0:
+            self.reporter.warning(
+                f"Mesh too coarse: mean edge {mean_edge:.4g} m "
+                f"> lambda/10 = {wavelength/10:.4g} m at {frequency:.4g} Hz"
+            )
 
-        Z = fill_impedance_matrix(
-            self.basis, self.mesh, k, eta0,
+        # --- Z-fill ---
+        total_pairs = N * (N + 1) // 2
+        self.reporter.stage_start(
+            "z_fill", N=N, total_pairs=total_pairs,
             quad_order=self.config.quad_order,
-            near_threshold=self.config.near_threshold,
         )
 
+        def _z_progress(fraction):
+            self.reporter.stage_progress("z_fill", fraction, row=int(fraction * N), N=N)
+
+        try:
+            Z = fill_impedance_matrix(
+                self.basis, self.mesh, k, eta0,
+                quad_order=self.config.quad_order,
+                near_threshold=self.config.near_threshold,
+                progress_callback=_z_progress,
+            )
+        except Exception:
+            self.reporter.error("Z-fill failed")
+            raise
+
+        # Sanity check
+        if not np.isfinite(Z).all():
+            self.reporter.error("Impedance matrix contains NaN/Inf")
+
+        if isinstance(self.reporter, RecordingReporter):
+            self.reporter.metadata.setdefault("z_fill", {})["z_memory_mb"] = Z.nbytes / 1e6
+        z_fill_rate = total_pairs  # will be divided by elapsed in stage_end
+        self.reporter.stage_end("z_fill", N=N)
+
+        # --- Excitation ---
         V = self.config.excitation.compute_voltage_vector(self.basis, self.mesh, k)
 
+        # --- Solve ---
         cond = float(np.linalg.cond(Z))
 
         if self.config.solver_type == 'gmres':
-            I = solve_gmres(Z, V)
+            self.reporter.stage_start("solve_gmres", N=N, tol=1e-6)
+
+            def _gmres_progress(iteration, residual):
+                self.reporter.stage_progress(
+                    "solve_gmres", min(iteration / 100, 0.999),
+                    iteration=iteration, residual=residual,
+                )
+
+            I = solve_gmres(Z, V, progress_callback=_gmres_progress)
+            residual = float(np.linalg.norm(Z @ I - V) / np.linalg.norm(V))
+            self.reporter.stage_end(
+                "solve_gmres", iterations=None, residual=residual,
+            )
         else:
+            self.reporter.stage_start("solve_direct", N=N)
             I = solve_direct(Z, V)
+            residual = float(np.linalg.norm(Z @ I - V) / np.linalg.norm(V))
+            self.reporter.stage_end("solve_direct", cond=cond, residual=residual)
+
+        if cond > 1e12:
+            self.reporter.warning(f"cond={cond:.2e}, results may be unreliable")
 
         # Compute input impedance for delta-gap
-        from .mom.excitation import DeltaGapExcitation
+        from .mom.excitation import DeltaGapExcitation, StripDeltaGapExcitation
         Z_in = None
-        if isinstance(self.config.excitation, DeltaGapExcitation):
+        if isinstance(self.config.excitation, StripDeltaGapExcitation):
+            Z_in = self.config.excitation.compute_input_impedance(
+                I, self.basis, self.mesh)
+        elif isinstance(self.config.excitation, DeltaGapExcitation):
             idx = self.config.excitation.basis_index
-            if abs(I[idx]) > 0:
-                Z_in = self.config.excitation.voltage / I[idx]
+            l_n = self.basis.edge_length[idx]
+            I_terminal = I[idx] * l_n
+            if abs(I_terminal) > 0:
+                Z_in = self.config.excitation.voltage / I_terminal
 
         return SimulationResult(
             frequency=frequency,

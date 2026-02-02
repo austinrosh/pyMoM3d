@@ -10,15 +10,17 @@ pyMoM3d solves the Electric Field Integral Equation (EFIE) for induced surface c
 
 ## Features
 
-- **Geometry primitives**: Rectangular plate, sphere, cylinder, cube, pyramid, or load from STL
-- **Automatic meshing**: Triangular surface meshes via [Gmsh](https://gmsh.info/) (recommended) or [trimesh](https://trimesh.org/) with configurable refinement
+- **Geometry primitives**: Rectangular plate, sphere, cylinder, cube, pyramid
+- **STL/OBJ import**: Load external mesh files (`.stl`, `.obj`) with automatic quality assessment and optional remeshing
+- **Automatic meshing**: Triangular surface meshes via [Gmsh](https://gmsh.info/) (recommended) or [trimesh](https://trimesh.org/) with configurable refinement; includes `mesh_plate_with_feed()` for conformal feed-line meshing
 - **RWG basis functions**: Automatic detection of interior edges and basis function assignment
 - **EFIE impedance matrix**: Full dense Z-matrix assembly with singularity extraction (Wilton 1984, Graglia 1993)
-- **Excitation sources**: Plane wave and delta-gap feed
+- **Excitation sources**: Plane wave, single-edge delta-gap, and strip delta-gap (distributed across transverse feed edges)
 - **Solvers**: Direct (LU) and iterative (GMRES with diagonal preconditioner)
-- **Post-processing**: Far-field computation, bistatic/monostatic RCS, input impedance, S11
+- **Post-processing**: Far-field computation, bistatic/monostatic RCS, input impedance, S11, directivity, beamwidth
 - **Validation**: Built-in Mie series for PEC sphere RCS comparison
 - **Visualization**: 3D mesh rendering and surface current density heatmaps
+- **Reporting**: Automatic simulation report generation with terminal progress and text-file summaries
 
 ## Quick Start
 
@@ -83,13 +85,22 @@ The trimesh mesher is still available (`mesher='trimesh'`, the default) for back
 | `dipole_impedance_sweep.py` | Strip dipole input impedance, current distribution, radiation pattern |
 | `plate_scattering.py` | Rectangular plate plane-wave scattering vs Physical Optics |
 | `simulation_driver_demo.py` | High-level `Simulation` API with frequency sweep and save/load |
+| `solver_performance.py` | Benchmarks Z-fill and solve time vs mesh size |
+| `stl_rcs_example.py` | Load an STL/OBJ file via file dialog, assess mesh quality, remesh if needed, compute bistatic RCS and surface current |
 
 ```bash
 PYTHONPATH=src python examples/sphere_rcs_validation.py
 PYTHONPATH=src python examples/dipole_impedance_sweep.py
 PYTHONPATH=src python examples/plate_scattering.py
 PYTHONPATH=src python examples/simulation_driver_demo.py
+PYTHONPATH=src python examples/stl_rcs_example.py
 ```
+
+> **Note:** `stl_rcs_example.py` uses `tkinter` for the file selection dialog. On macOS, the default Homebrew Python may not include tkinter. To install it:
+> ```bash
+> brew install python-tk@3.13   # match your Python version
+> ```
+> On Ubuntu/Debian: `sudo apt install python3-tk`. On Windows, tkinter is included with the standard Python installer.
 
 ## Project Structure
 
@@ -102,8 +113,8 @@ src/pyMoM3d/
     fields/         Far-field computation, RCS
     analysis/       Mie series, convergence studies, impedance analysis
     visualization/  3D mesh and surface current plotting
-    utils/          Physical constants (c0, mu0, eps0, eta0)
-    simulation.py   High-level simulation driver
+    utils/          Physical constants, progress reporting, report generation
+    simulation.py   High-level simulation driver with STL/OBJ loading
 tests/              Unit and integration tests
 examples/           Standalone example scripts
 docs/               Documentation

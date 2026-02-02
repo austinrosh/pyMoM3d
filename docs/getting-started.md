@@ -35,7 +35,10 @@ The runtime dependencies are listed in `requirements.txt`:
 - **scipy** — spherical Bessel functions (Mie series), GMRES solver
 - **matplotlib** — plotting and visualization
 - **gmsh** — high-quality surface meshing with element size control (recommended mesher)
-- **trimesh** — geometry meshing fallback (icosphere, cylinder, etc.)
+- **trimesh** — geometry meshing fallback and STL/OBJ file loading
+
+**Optional:**
+- **tkinter** — required for the file-selection dialog in `stl_rcs_example.py`. On macOS with Homebrew Python: `brew install python-tk@3.13` (match your Python version). On Ubuntu/Debian: `sudo apt install python3-tk`. On Windows, tkinter is included with the standard Python installer.
 
 All commands in this documentation assume you run them from the repository root with `PYTHONPATH=src` set, or equivalently:
 
@@ -85,6 +88,34 @@ rcs_dBsm = compute_rcs(E_theta, E_phi)
 plot_mesh_3d(mesh, show_edges=True)
 plot_surface_current(I, basis, mesh, cmap='hot')
 ```
+
+## Quick Start: Load an STL/OBJ File
+
+You can load external mesh files and solve directly — no geometry primitive needed:
+
+```python
+import numpy as np
+from pyMoM3d import (
+    load_stl, GmshMesher, compute_rwg_connectivity,
+    Simulation, SimulationConfig, PlaneWaveExcitation,
+    compute_far_field, compute_rcs,
+    eta0, c0,
+)
+
+# Load STL (preserving original triangulation)
+mesh = load_stl("my_object.stl")
+
+# Or remesh with Gmsh for element size control
+mesh = GmshMesher(target_edge_length=0.02).mesh_from_file("my_object.stl")
+
+# Solve using the high-level driver with a pre-built mesh
+exc = PlaneWaveExcitation(E0=np.array([1, 0, 0]), k_hat=np.array([0, 0, -1]))
+config = SimulationConfig(frequency=1e9, excitation=exc, enable_report=True)
+sim = Simulation(config, mesh=mesh)
+result = sim.run()
+```
+
+For a fully interactive workflow with mesh quality assessment and solver recommendations, see `examples/stl_rcs_example.py`.
 
 ## Quick Start: High-Level Simulation Driver
 
@@ -157,6 +188,12 @@ PYTHONPATH=src python examples/plate_scattering.py
 
 # High-level simulation driver demo
 PYTHONPATH=src python examples/simulation_driver_demo.py
+
+# Solver performance benchmark
+PYTHONPATH=src python examples/solver_performance.py
+
+# Interactive STL/OBJ → RCS + surface current (requires tkinter)
+PYTHONPATH=src python examples/stl_rcs_example.py
 ```
 
 Each example prints diagnostic output to the terminal and saves plots to the `images/` directory.
@@ -173,8 +210,8 @@ pyMoM3d/
     fields/         Far-field computation, RCS
     analysis/       Mie series, convergence studies, impedance analysis
     visualization/  3D mesh and surface current plotting
-    utils/          Physical constants
-    simulation.py   High-level simulation driver
+    utils/          Physical constants, progress reporting, report generation
+    simulation.py   High-level simulation driver with STL/OBJ loading
   tests/            Unit and integration tests
   examples/         Standalone example scripts
   docs/             This documentation

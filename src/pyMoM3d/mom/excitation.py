@@ -109,8 +109,143 @@ class DeltaGapExcitation(Excitation):
         N = rwg_basis.num_basis
         V = np.zeros(N, dtype=np.complex128)
         if 0 <= self.basis_index < N:
-            V[self.basis_index] = self.voltage
+            V[self.basis_index] = self.voltage * rwg_basis.edge_length[self.basis_index]
         return V
+
+
+def find_feed_edges(
+    mesh: Mesh,
+    rwg_basis: RWGBasis,
+    feed_x: float,
+    tol: float = None,
+) -> list:
+    """Find all interior basis functions whose shared edge crosses x=feed_x transversely.
+
+    For strip dipole feed models, identifies edges that:
+    1. Straddle the feed line (one vertex on each side, or both on it)
+    2. Are approximately perpendicular to x (i.e., y-directed)
+
+    Parameters
+    ----------
+    mesh : Mesh
+    rwg_basis : RWGBasis
+    feed_x : float
+        x-coordinate of the feed line.
+    tol : float, optional
+        Positional tolerance. Defaults to half the minimum edge length.
+
+    Returns
+    -------
+    indices : list of int
+        Basis function indices for edges crossing the feed line.
+    """
+    if tol is None:
+        # Estimate from mesh
+        lengths = []
+        for n in range(min(rwg_basis.num_basis, 50)):
+            e = mesh.edges[rwg_basis.edge_index[n]]
+            lengths.append(np.linalg.norm(
+                mesh.vertices[e[1]] - mesh.vertices[e[0]]))
+        tol = 0.5 * min(lengths) if lengths else 1e-6
+
+    indices = []
+    for n in range(rwg_basis.num_basis):
+        e = mesh.edges[rwg_basis.edge_index[n]]
+        va = mesh.vertices[e[0]]
+        vb = mesh.vertices[e[1]]
+        mid_x = 0.5 * (va[0] + vb[0])
+
+        # Edge midpoint must be near the feed line
+        if abs(mid_x - feed_x) > tol:
+            continue
+
+        # Edge must be approximately transverse (y-directed)
+        edge_dir = vb - va
+        edge_len = np.linalg.norm(edge_dir)
+        if edge_len < 1e-30:
+            continue
+        edge_dir /= edge_len
+
+        # Accept if |y-component| > |x-component| (more transverse than longitudinal)
+        if abs(edge_dir[1]) > abs(edge_dir[0]):
+            indices.append(n)
+
+    return indices
+
+
+class StripDeltaGapExcitation(Excitation):
+    """Delta-gap excitation distributed across multiple transverse edges.
+
+    For strip dipole feed models where the gap spans multiple mesh edges.
+    Applies V_m = voltage to each transverse feed edge.
+
+    The input impedance is computed as Z_in = voltage / I_terminal,
+    where I_terminal is the total current crossing the feed gap.
+
+    Parameters
+    ----------
+    feed_basis_indices : list of int
+        Basis function indices for edges crossing the feed gap.
+    voltage : complex
+        Applied voltage (V).
+    """
+
+    def __init__(self, feed_basis_indices: list, voltage: complex = 1.0):
+        self.feed_basis_indices = list(feed_basis_indices)
+        self.voltage = complex(voltage)
+
+    def compute_voltage_vector(
+        self, rwg_basis: RWGBasis, mesh: Mesh, k: float
+    ) -> np.ndarray:
+        """Compute voltage vector for the strip delta gap.
+
+        For RWG basis functions with f_n = l_n/(2A) * rho, the Galerkin
+        testing of a delta-gap field E = V_0 * delta(x) * x_hat gives:
+
+            V_m = V_0 * integral_edge f_m . n_hat dl = V_0 * l_m
+
+        because f . n_hat = 1 at the shared edge (an RWG identity).
+        """
+        N = rwg_basis.num_basis
+        V = np.zeros(N, dtype=np.complex128)
+        for idx in self.feed_basis_indices:
+            if 0 <= idx < N:
+                V[idx] = self.voltage * rwg_basis.edge_length[idx]
+        return V
+
+    def compute_input_impedance(
+        self,
+        I_coeffs: np.ndarray,
+        rwg_basis: RWGBasis,
+        mesh: Mesh,
+    ) -> complex:
+        """Compute input impedance from the solved current coefficients.
+
+        For RWG with f_n = l_n/(2A)*rho, the physical terminal current
+        (line integral of J across the feed gap) is:
+
+            I_terminal = sum_n I_n * l_n
+
+        and the input impedance is Z_in = V_0 / I_terminal.
+
+        Parameters
+        ----------
+        I_coeffs : ndarray, shape (N,), complex128
+            Current expansion coefficients.
+        rwg_basis : RWGBasis
+        mesh : Mesh
+
+        Returns
+        -------
+        Z_in : complex
+        """
+        I_terminal = 0.0 + 0.0j
+        for idx in self.feed_basis_indices:
+            I_terminal += I_coeffs[idx] * rwg_basis.edge_length[idx]
+
+        if abs(I_terminal) < 1e-30:
+            return np.inf + 0j
+        return self.voltage / I_terminal
 
 
 def find_nearest_edge(mesh: Mesh, rwg_basis: RWGBasis, point: np.ndarray) -> int:

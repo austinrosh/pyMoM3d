@@ -37,6 +37,7 @@ def solve_gmres(
     V: np.ndarray,
     tol: float = 1e-6,
     maxiter: int = 1000,
+    progress_callback=None,
 ) -> np.ndarray:
     """Solve ZI = V using GMRES with diagonal preconditioner.
 
@@ -50,6 +51,8 @@ def solve_gmres(
         Convergence tolerance.
     maxiter : int
         Maximum iterations.
+    progress_callback : callable, optional
+        Called with ``(iteration, residual_norm)`` during GMRES iterations.
 
     Returns
     -------
@@ -66,7 +69,15 @@ def solve_gmres(
 
     M = LinearOperator((N, N), matvec=lambda x: diag_inv * x)
 
-    I, info = gmres(Z, V, M=M, rtol=tol, maxiter=maxiter)
+    _iter_count = [0]
+
+    def _scipy_callback(pr_norm):
+        _iter_count[0] += 1
+        if progress_callback is not None:
+            progress_callback(_iter_count[0], float(pr_norm))
+
+    I, info = gmres(Z, V, M=M, rtol=tol, maxiter=maxiter,
+                    callback=_scipy_callback, callback_type='pr_norm')
 
     if info != 0:
         logger.warning(f"GMRES did not converge (info={info})")

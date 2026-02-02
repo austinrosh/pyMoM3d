@@ -134,6 +134,7 @@ def fill_impedance_matrix(
     eta: float,
     quad_order: int = 4,
     near_threshold: float = 0.2,
+    progress_callback=None,
 ) -> np.ndarray:
     """Assemble the EFIE impedance matrix.
 
@@ -151,6 +152,9 @@ def fill_impedance_matrix(
         Quadrature order for triangle integration.
     near_threshold : float
         Near-field threshold for singularity extraction.
+    progress_callback : callable, optional
+        Called once per completed outer row with ``progress_callback(fraction)``
+        where *fraction* is in [0, 1).
 
     Returns
     -------
@@ -163,7 +167,11 @@ def fill_impedance_matrix(
     prefactor_A = 1j * k * eta
     prefactor_Phi = -1j * eta / k
 
+    total_pairs = N * (N + 1) // 2
     for m in range(N):
+        if progress_callback is not None:
+            done = m * (2 * N - m - 1) // 2
+            progress_callback(done / total_pairs if total_pairs > 0 else 0.0)
         for n in range(m, N):
             I_A_total = 0.0 + 0.0j
             I_Phi_total = 0.0 + 0.0j
