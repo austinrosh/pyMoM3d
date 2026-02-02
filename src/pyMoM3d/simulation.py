@@ -388,13 +388,37 @@ class Simulation:
         )
 
 
+def _load_trimesh(path: str):
+    """Load an STL or OBJ file and return a single trimesh.Trimesh.
+
+    OBJ files with multiple material groups or objects are returned as
+    a ``trimesh.Scene`` by ``trimesh.load()``.  This helper collapses
+    the scene into one ``Trimesh`` via concatenation so downstream code
+    always receives a single mesh.
+    """
+    import trimesh as _trimesh
+
+    loaded = _trimesh.load(path)
+    if isinstance(loaded, _trimesh.Trimesh):
+        return loaded
+    if isinstance(loaded, _trimesh.Scene):
+        meshes = [g for g in loaded.geometry.values()
+                  if isinstance(g, _trimesh.Trimesh)]
+        if not meshes:
+            raise ValueError(f"No triangle meshes found in {path}")
+        return _trimesh.util.concatenate(meshes)
+    raise TypeError(
+        f"Unexpected type from trimesh.load(): {type(loaded).__name__}"
+    )
+
+
 def load_stl(path: str, mesher: str = 'trimesh') -> Mesh:
-    """Load a mesh from an STL file.
+    """Load a mesh from an STL or OBJ file.
 
     Parameters
     ----------
     path : str
-        Path to .stl file.
+        Path to .stl or .obj file.
     mesher : str
         Mesher backend: 'trimesh' (default) or 'gmsh'.
 
@@ -405,7 +429,6 @@ def load_stl(path: str, mesher: str = 'trimesh') -> Mesh:
     if mesher == 'gmsh':
         from .mesh.gmsh_mesher import GmshMesher
         return GmshMesher().mesh_from_file(path)
-    import trimesh
-    trimesh_obj = trimesh.load(path)
+    trimesh_obj = _load_trimesh(path)
     m = PythonMesher()
     return m.mesh_from_geometry(trimesh_obj)

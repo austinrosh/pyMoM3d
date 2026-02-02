@@ -519,7 +519,12 @@ class GmshMesher:
 
     def mesh_from_file(self, path: str) -> Mesh:
         """
-        Load and mesh a geometry file (STL, STEP, IGES, etc.).
+        Load and remesh a geometry file (STL, OBJ, STEP, IGES, etc.).
+
+        For discrete mesh formats (STL, OBJ), the imported triangulation is
+        reclassified into geometric surfaces so that Gmsh can generate a
+        fresh mesh with the requested element size.  For CAD formats (STEP,
+        IGES), standard CAD meshing is used.
 
         Parameters
         ----------
@@ -530,6 +535,13 @@ class GmshMesher:
         -------
         mesh : Mesh
         """
+        import os
+        ext = os.path.splitext(path)[1].lower()
+
+        if ext in ('.stl', '.obj'):
+            return self._remesh_discrete(path)
+
+        # CAD formats (STEP, IGES, etc.)
         self._init_gmsh()
         try:
             gmsh.merge(path)
@@ -541,5 +553,63 @@ class GmshMesher:
         except Exception:
             self._finalize_gmsh()
             raise
+        return mesh
 
+    def _remesh_discrete(self, path: str) -> Mesh:
+        """Remesh an STL or OBJ file.
+
+        Loads the mesh and, if ``target_edge_length`` is set, uniformly
+        refines it until the mean edge length is at or below the target.
+        Each refinement pass subdivides every triangle into four,
+        halving the mean edge length.
+
+        This approach is robust for arbitrary real-world STL/OBJ files
+        and avoids the slow/unreliable parametric re-meshing pipeline
+        (classifySurfaces + createGeometry + generate) which can hang
+        on complex meshes.
+        """
+        self._init_gmsh()
+        try:
+            gmsh.merge(path)
+
+            if self.target_edge_length is not None:
+                # Estimate current mean edge length from the imported mesh
+                node_tags, coords, _ = gmsh.model.mesh.getNodes()
+                elem_types, _, elem_node_tags = gmsh.model.mesh.getElements(dim=2)
+                verts = np.array(coords, dtype=np.float64).reshape(-1, 3)
+                tag_to_idx = {int(t): i for i, t in enumerate(node_tags)}
+
+                edge_set = set()
+                for etype, enodes in zip(elem_types, elem_node_tags):
+                    if etype == 2:
+                        tris = np.array(enodes, dtype=np.int64).reshape(-1, 3)
+                        for tri in tris:
+                            idxs = [tag_to_idx[int(t)] for t in tri]
+                            for a, b in [(0, 1), (1, 2), (2, 0)]:
+                                edge_set.add((min(idxs[a], idxs[b]),
+                                              max(idxs[a], idxs[b])))
+
+                if edge_set:
+                    edges_arr = np.array(list(edge_set))
+                    lengths = np.linalg.norm(
+                        verts[edges_arr[:, 0]] - verts[edges_arr[:, 1]],
+                        axis=1,
+                    )
+                    mean_edge = float(np.mean(lengths))
+                else:
+                    mean_edge = 0.0
+
+                # Each refine() halves mean edge length
+                target = self.target_edge_length
+                refinements = 0
+                while mean_edge > target and refinements < 5:
+                    gmsh.model.mesh.refine()
+                    mean_edge /= 2.0
+                    refinements += 1
+
+            mesh = self._extract_surface_mesh()
+            self._finalize_gmsh()
+        except Exception:
+            self._finalize_gmsh()
+            raise
         return mesh

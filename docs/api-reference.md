@@ -155,7 +155,7 @@ Per-basis-function data for RWG basis functions.
 
 ## `pyMoM3d.mom` — Method of Moments
 
-### `fill_impedance_matrix(rwg_basis, mesh, k, eta, quad_order=4, near_threshold=0.2)` -> `ndarray (N,N) complex128`
+### `fill_impedance_matrix(rwg_basis, mesh, k, eta, quad_order=4, near_threshold=0.2, progress_callback=None)` -> `ndarray (N,N) complex128`
 
 Assemble the EFIE impedance matrix Z.
 
@@ -165,6 +165,7 @@ Assemble the EFIE impedance matrix Z.
 - `eta` (float): Intrinsic impedance. Use `eta0` (~377 Ohms) for free space.
 - `quad_order` (int): Gauss quadrature order. Valid: 1, 3, 4, 7, 13. Default 4.
 - `near_threshold` (float): Controls when singularity extraction activates. Default 0.2.
+- `progress_callback` (callable, optional): Called with `(fraction)` during assembly for progress reporting.
 
 ### `PlaneWaveExcitation(E0, k_hat)`
 
@@ -209,9 +210,11 @@ Find the basis function whose shared edge midpoint is closest to `point`. Useful
 
 Solve `ZI = V` via LU factorization (`numpy.linalg.solve`).
 
-### `solve_gmres(Z, V, tol=1e-6, maxiter=1000)` -> `ndarray (N,) complex128`
+### `solve_gmres(Z, V, tol=1e-6, maxiter=1000, progress_callback=None)` -> `ndarray (N,) complex128`
 
 Solve `ZI = V` via GMRES with diagonal preconditioner (`scipy.sparse.linalg.gmres`).
+
+- `progress_callback` (callable, optional): Called with `(iteration, residual)` per iteration.
 
 ### `evaluate_surface_current(I_coeffs, rwg_basis, mesh, points)` -> `ndarray (M,3) complex128`
 

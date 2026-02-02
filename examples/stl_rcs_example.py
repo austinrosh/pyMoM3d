@@ -45,13 +45,13 @@ def load_mesh_from_file(path):
     -------
     mesh : Mesh
     """
-    import trimesh
-    trimesh_obj = trimesh.load(path)
+    from pyMoM3d.simulation import _load_trimesh
+    trimesh_obj = _load_trimesh(path)
     mesher = PythonMesher()
     return mesher.mesh_from_geometry(trimesh_obj)
 
 
-def assess_mesh_quality(stats, validation, wavelength):
+def assess_mesh_quality(stats, validation, wavelength, required_epw=10):
     """Assess mesh quality and decide on remeshing.
 
     Parameters
@@ -62,6 +62,9 @@ def assess_mesh_quality(stats, validation, wavelength):
         From mesh.validate().
     wavelength : float
         Wavelength in meters.
+    required_epw : float
+        Minimum required elements per wavelength. Meshes below this
+        threshold must be remeshed.
 
     Returns
     -------
@@ -77,14 +80,16 @@ def assess_mesh_quality(stats, validation, wavelength):
     elements_per_lambda = wavelength / mean_edge
 
     # Check elements per wavelength
-    if elements_per_lambda < 10:
+    if elements_per_lambda < required_epw:
         must_remesh = True
         reasons.append(
-            f"Elements per wavelength: {elements_per_lambda:.1f} (< 10 required)"
+            f"Elements per wavelength: {elements_per_lambda:.1f} "
+            f"(< {required_epw} required)"
         )
     else:
         reasons.append(
-            f"Elements per wavelength: {elements_per_lambda:.1f} (>= 10 OK)"
+            f"Elements per wavelength: {elements_per_lambda:.1f} "
+            f"(>= {required_epw} OK)"
         )
 
     # Check edge length ratio
@@ -131,7 +136,28 @@ def remesh_file(path, target_edge_length):
     return mesher.mesh_from_file(path)
 
 
-def plot_bistatic_rcs(theta_deg, rcs_dBsm, freq, filename, num_basis, output_path):
+def _format_vec(v):
+    """Format a 3-vector as a compact string like '(0,0,-1)'."""
+    parts = []
+    for x in v:
+        if x == int(x):
+            parts.append(str(int(x)))
+        else:
+            parts.append(f'{x:.2g}')
+    return '(' + ','.join(parts) + ')'
+
+
+def _exc_subtitle(exc):
+    """Return a subtitle string describing the excitation, or ''."""
+    if isinstance(exc, PlaneWaveExcitation):
+        pol = _format_vec(exc.E0)
+        prop = _format_vec(exc.k_hat)
+        return f'Plane wave: pol E0={pol}, prop k={prop}'
+    return ''
+
+
+def plot_bistatic_rcs(theta_deg, rcs_dBsm, freq, filename, num_basis,
+                      output_path, exc=None):
     """Create and save a polar plot of bistatic RCS.
 
     Parameters
@@ -148,6 +174,8 @@ def plot_bistatic_rcs(theta_deg, rcs_dBsm, freq, filename, num_basis, output_pat
         Number of RWG basis functions.
     output_path : str
         Path to save the figure.
+    exc : Excitation, optional
+        Excitation object; if PlaneWaveExcitation, its info is shown.
     """
     # Mirror for full polar plot: 0->360
     theta_rad_full = np.concatenate([
@@ -156,20 +184,25 @@ def plot_bistatic_rcs(theta_deg, rcs_dBsm, freq, filename, num_basis, output_pat
     ])
     rcs_full = np.concatenate([rcs_dBsm, rcs_dBsm[::-1]])
 
+    title_lines = [
+        f'Bistatic RCS — {os.path.basename(filename)}',
+        f'f = {freq/1e9:.3f} GHz, N = {num_basis} basis functions',
+    ]
+    sub = _exc_subtitle(exc) if exc is not None else ''
+    if sub:
+        title_lines.append(sub)
+
     fig, ax = plt.subplots(1, 1, subplot_kw={'projection': 'polar'}, figsize=(8, 8))
     ax.plot(theta_rad_full, rcs_full, 'b-', linewidth=1.5)
-    ax.set_title(
-        f'Bistatic RCS — {os.path.basename(filename)}\n'
-        f'f = {freq/1e9:.3f} GHz, N = {num_basis} basis functions',
-        pad=20,
-    )
+    ax.set_title('\n'.join(title_lines), pad=20)
     ax.set_xlabel('RCS (dBsm)')
     fig.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches='tight')
     print(f"Saving plots to {output_path}")
 
 
-def plot_current(I_coeffs, basis, mesh, freq, filename, output_path):
+def plot_current(I_coeffs, basis, mesh, freq, filename, output_path,
+                  log_scale=False, exc=None):
     """Create and save a 3D surface current plot.
 
     Parameters
@@ -186,16 +219,28 @@ def plot_current(I_coeffs, basis, mesh, freq, filename, output_path):
         Input file name.
     output_path : str
         Path to save the figure.
+    log_scale : bool
+        If True, plot |J| in dB scale.
+    exc : Excitation, optional
+        Excitation object; if PlaneWaveExcitation, its info is shown.
     """
+    scale_label = "dB" if log_scale else "linear"
+    title_lines = [
+        f'Induced surface current |J| ({scale_label}) — '
+        f'{os.path.basename(filename)}',
+        f'f = {freq/1e9:.3f} GHz, N = {basis.num_basis} basis functions',
+    ]
+    sub = _exc_subtitle(exc) if exc is not None else ''
+    if sub:
+        title_lines.append(sub)
+
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
     plot_surface_current(
         I_coeffs, basis, mesh, ax=ax, cmap='hot',
         edge_color='gray', edge_width=0.3,
-        title=(
-            f'Induced surface current |J| — {os.path.basename(filename)}\n'
-            f'f = {freq/1e9:.3f} GHz, N = {basis.num_basis} basis functions'
-        ),
+        log_scale=log_scale,
+        title='\n'.join(title_lines),
     )
     ax.view_init(elev=30, azim=-60)
     fig.savefig(output_path, dpi=150, bbox_inches='tight')
@@ -246,6 +291,26 @@ def main():
     frequency = freq_ghz * 1e9
     wavelength = c0 / frequency
 
+    # --- Mesh resolution ---
+    # Controls the target elements-per-wavelength used for remeshing.
+    #   coarse  : lambda/8   (~8 elements/lambda)  — fast, lower accuracy
+    #   medium  : lambda/15  (~15 elements/lambda)  — balanced (default)
+    #   fine    : lambda/25  (~25 elements/lambda)  — slow, higher accuracy
+    RESOLUTION_MAP = {
+        'coarse': (8,  'fast, lower accuracy'),
+        'medium': (15, 'balanced'),
+        'fine':   (25, 'slow, higher accuracy'),
+    }
+    print("\nMesh resolution:")
+    for key, (epw, desc) in RESOLUTION_MAP.items():
+        tag = " (default)" if key == 'medium' else ""
+        print(f"  {key:8s} — ~{epw} elements/lambda, {desc}{tag}")
+    res_str = input("Select resolution [coarse/medium/fine, default: medium]: ").strip().lower()
+    if res_str not in RESOLUTION_MAP:
+        res_str = 'medium'
+    elements_per_wave, _ = RESOLUTION_MAP[res_str]
+    print(f"  Using '{res_str}' resolution ({elements_per_wave} elements/lambda)")
+
     # --- Load mesh ---
     print(f"\nLoading: {path}")
     try:
@@ -288,7 +353,7 @@ def main():
     # --- Assess mesh quality ---
     print("\nMesh quality assessment:")
     must_remesh, recommend_remesh, reasons = assess_mesh_quality(
-        stats, validation, wavelength
+        stats, validation, wavelength, required_epw=elements_per_wave
     )
     for r in reasons:
         marker = "!" if "must" in r.lower() or "WARNING" in r else \
@@ -297,7 +362,7 @@ def main():
 
     # Decide on remeshing
     do_remesh = False
-    target_el = min(wavelength / 15.0, mean_edge)
+    target_el = min(wavelength / elements_per_wave, mean_edge)
 
     if must_remesh:
         print(f"\nRemeshing required (target_edge_length={target_el:.4f} m)...")
@@ -351,8 +416,8 @@ def main():
         solver_type = 'direct'
 
     exc = PlaneWaveExcitation(
-        E0=np.array([1.0, 0.0, 0.0]),      # x-polarized
-        k_hat=np.array([0.0, 0.0, -1.0]),   # propagating in -z
+        E0=np.array([0.0, 0.0, 1.0]),      # z-polarized
+        k_hat=np.array([0.0, 1, 0.0]),   # propagating in +y
     )
 
     config = SimulationConfig(
@@ -389,6 +454,11 @@ def main():
     plot_current(
         I, basis, mesh, frequency, path,
         os.path.join(images_dir, f'{basename}_surface_current.png'),
+    )
+    plot_current(
+        I, basis, mesh, frequency, path,
+        os.path.join(images_dir, f'{basename}_surface_current_dB.png'),
+        log_scale=True,
     )
 
     plt.show()

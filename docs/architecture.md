@@ -72,7 +72,9 @@ from pyMoM3d import GmshMesher
 mesh = GmshMesher(target_edge_length=0.01).mesh_from_file("antenna.step")
 ```
 
-Both `.stl` and `.obj` formats are supported by `trimesh.load()` and `gmsh.merge()`. The interactive example `stl_rcs_example.py` provides automatic mesh quality assessment and remesh recommendations when loading external files.
+Both `.stl` and `.obj` formats are supported by `trimesh.load()` and `gmsh.merge()`. OBJ files with multiple material groups are automatically concatenated into a single mesh. When remeshing STL/OBJ files, `GmshMesher.mesh_from_file()` uses uniform mesh refinement (`gmsh.model.mesh.refine()`) to reach the target edge length, which is fast and reliable on complex discrete meshes.
+
+The interactive example `stl_rcs_example.py` provides automatic mesh quality assessment, configurable resolution presets (coarse/medium/fine), and remesh recommendations when loading external files.
 
 ## Stage 2: Mesh (`mesh/`)
 

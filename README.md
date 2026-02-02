@@ -19,7 +19,7 @@ pyMoM3d solves the Electric Field Integral Equation (EFIE) for induced surface c
 - **Solvers**: Direct (LU) and iterative (GMRES with diagonal preconditioner)
 - **Post-processing**: Far-field computation, bistatic/monostatic RCS, input impedance, S11, directivity, beamwidth
 - **Validation**: Built-in Mie series for PEC sphere RCS comparison
-- **Visualization**: 3D mesh rendering and surface current density heatmaps
+- **Visualization**: 3D mesh rendering and surface current density heatmaps (linear and dB scale)
 - **Reporting**: Automatic simulation report generation with terminal progress and text-file summaries
 
 ## Quick Start
@@ -86,7 +86,7 @@ The trimesh mesher is still available (`mesher='trimesh'`, the default) for back
 | `plate_scattering.py` | Rectangular plate plane-wave scattering vs Physical Optics |
 | `simulation_driver_demo.py` | High-level `Simulation` API with frequency sweep and save/load |
 | `solver_performance.py` | Benchmarks Z-fill and solve time vs mesh size |
-| `stl_rcs_example.py` | Load an STL/OBJ file via file dialog, assess mesh quality, remesh if needed, compute bistatic RCS and surface current |
+| `stl_rcs_example.py` | Load an STL/OBJ file via file dialog, choose mesh resolution (coarse/medium/fine), assess quality, remesh if needed, compute bistatic RCS and surface current (linear + dB) |
 
 ```bash
 PYTHONPATH=src python examples/sphere_rcs_validation.py

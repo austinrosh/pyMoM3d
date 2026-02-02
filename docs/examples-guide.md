@@ -232,24 +232,31 @@ PYTHONPATH=src python examples/solver_performance.py
 2. Loads the mesh via trimesh (preserving the original triangulation)
 3. Prints mesh statistics: triangle/vertex/edge counts, edge lengths, elements per wavelength
 4. Displays the imported mesh interactively via `plot_mesh_3d` (close window to continue)
-5. Assesses mesh quality:
-   - Elements/wavelength < 10 → **must remesh** (automatic)
+5. Prompts for mesh resolution:
+   - **coarse** — ~8 elements/wavelength (fast, lower accuracy)
+   - **medium** — ~15 elements/wavelength (balanced, default)
+   - **fine** — ~25 elements/wavelength (slow, higher accuracy)
+6. Assesses mesh quality against the selected resolution:
+   - Elements/wavelength below target → **must remesh** (automatic)
    - Edge ratio > 5.0 → **recommend remesh** (prompts user)
    - Degenerate triangles → **must remesh**
    - Non-manifold edges → **warn** (cannot fix by remeshing)
-6. If remeshing: uses `GmshMesher.mesh_from_file()` with `target_edge_length = min(lambda/15, mean_edge)`, then shows the remeshed model
-7. For large meshes (>2000 estimated basis functions), recommends GMRES over direct LU and prompts for solver choice
-8. Runs the solve via `Simulation(config, mesh=mesh)` with `enable_report=True`
-9. Computes bistatic RCS (361 points, theta 0→pi, phi=0) and saves:
-   - Polar RCS plot to `images/<name>_rcs_bistatic.png`
-   - 3D surface current plot to `images/<name>_surface_current.png`
+7. If remeshing: uses `GmshMesher.mesh_from_file()` with `target_edge_length = min(lambda/epw, mean_edge)`, then shows the remeshed model
+8. For large meshes (>2000 estimated basis functions), recommends GMRES over direct LU and prompts for solver choice
+9. Runs the solve via `Simulation(config, mesh=mesh)` with `enable_report=True`
+10. Computes bistatic RCS (361 points, theta 0→pi, phi=0) and saves:
+    - Polar RCS plot to `images/<name>_rcs_bistatic.png`
+    - 3D surface current plot (linear) to `images/<name>_surface_current.png`
+    - 3D surface current plot (dB scale) to `images/<name>_surface_current_dB.png`
+11. Plot titles include plane wave configuration (polarization and propagation direction) when applicable
 
 **Generated plots** (`images/`):
 
 | File | Content |
 |---|---|
-| `<name>_rcs_bistatic.png` | Polar bistatic RCS plot |
-| `<name>_surface_current.png` | 3D surface current density heatmap |
+| `<name>_rcs_bistatic.png` | Polar bistatic RCS plot with plane wave info |
+| `<name>_surface_current.png` | 3D surface current density heatmap (linear scale) |
+| `<name>_surface_current_dB.png` | 3D surface current density heatmap (dB scale) |
 
 **Relevant code pattern — solving with a pre-built mesh:**
 
