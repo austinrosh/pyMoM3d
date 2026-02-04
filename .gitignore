@@ -43,6 +43,8 @@ models/
 
 # Local docs not for public repo
 docs/roadmap.md
+docs/theory_of_operation.md
+/plans
 
 # Personal utility scripts
 examples/freq_finder.py

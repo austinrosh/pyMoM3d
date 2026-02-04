@@ -11,7 +11,14 @@ from .mesh import (
     GmshMesher,
     compute_rwg_connectivity,
 )
-from .visualization import plot_mesh, plot_mesh_3d, plot_surface_current, compute_triangle_current_density
+from .visualization import (
+    plot_mesh,
+    plot_mesh_3d,
+    plot_surface_current,
+    compute_triangle_current_density,
+    plot_surface_current_vectors,
+    compute_triangle_current_vectors,
+)
 from .utils.constants import c0, mu0, eps0, eta0
 from .utils.reporter import TerminalReporter, SilentReporter, RecordingReporter
 from .mom import (
@@ -24,6 +31,19 @@ from .mom import (
 from .mom.excitation import StripDeltaGapExcitation, find_feed_edges
 from .fields import compute_far_field, compute_rcs
 from .simulation import Simulation, SimulationConfig, SimulationResult, load_stl
+from .analysis.cma import (
+    CMAResult,
+    compute_characteristic_modes,
+    compute_modal_significance,
+    compute_characteristic_angle,
+    solve_cma,
+    track_modes_across_frequency,
+    verify_orthogonality,
+    verify_eigenvalue_reality,
+    compute_modal_excitation_coefficient,
+    expand_current_in_modes,
+    cma_frequency_sweep,
+)
 
 __version__ = '0.2.0'
 
@@ -36,6 +56,7 @@ __all__ = [
     'PythonMesher', 'create_mesh_from_trimesh', 'GmshMesher', 'compute_rwg_connectivity',
     # Visualization
     'plot_mesh', 'plot_mesh_3d', 'plot_surface_current', 'compute_triangle_current_density',
+    'plot_surface_current_vectors', 'compute_triangle_current_vectors',
     # Constants
     'c0', 'mu0', 'eps0', 'eta0',
     # MoM
@@ -48,4 +69,16 @@ __all__ = [
     'Simulation', 'SimulationConfig', 'SimulationResult', 'load_stl',
     # Reporter
     'TerminalReporter', 'SilentReporter', 'RecordingReporter',
+    # CMA
+    'CMAResult',
+    'compute_characteristic_modes',
+    'compute_modal_significance',
+    'compute_characteristic_angle',
+    'solve_cma',
+    'track_modes_across_frequency',
+    'verify_orthogonality',
+    'verify_eigenvalue_reality',
+    'compute_modal_excitation_coefficient',
+    'expand_current_in_modes',
+    'cma_frequency_sweep',
 ]

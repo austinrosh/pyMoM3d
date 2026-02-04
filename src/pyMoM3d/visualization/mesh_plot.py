@@ -241,6 +241,72 @@ def compute_triangle_current_density(
     return np.linalg.norm(J, axis=1).real
 
 
+def compute_triangle_current_vectors(
+    I: np.ndarray,
+    basis: RWGBasis,
+    mesh: Mesh,
+    component: str = 'real',
+) -> tuple:
+    """Compute surface current density vectors J(r) at each triangle centroid.
+
+    Evaluates J(r) = sum_n I_n * f_n(r) at the centroid of each triangle,
+    where f_n is the RWG basis function. Returns J as 3D vectors.
+
+    Parameters
+    ----------
+    I : ndarray, shape (N,), complex128
+        RWG basis function coefficients.
+    basis : RWGBasis
+        RWG basis function data.
+    mesh : Mesh
+        Surface mesh.
+    component : str, default 'real'
+        Which part of the complex current to return: 'real' or 'imag'.
+
+    Returns
+    -------
+    J_vectors : ndarray, shape (num_triangles, 3), float64
+        Surface current density vectors at each triangle centroid.
+    J_mag : ndarray, shape (num_triangles,), float64
+        Surface current density magnitude at each triangle centroid.
+    centroids : ndarray, shape (num_triangles, 3), float64
+        Centroid positions of each triangle.
+    """
+    if component not in ('real', 'imag'):
+        raise ValueError("component must be 'real' or 'imag'")
+
+    num_tri = mesh.get_num_triangles()
+    J = np.zeros((num_tri, 3), dtype=np.complex128)
+
+    centroids = np.mean(mesh.vertices[mesh.triangles], axis=1)  # (num_tri, 3)
+
+    for n in range(basis.num_basis):
+        l_n = basis.edge_length[n]
+
+        # T+ contribution: f_n = (l_n / 2A+) * (r - r_free+)
+        t_p = basis.t_plus[n]
+        A_p = basis.area_plus[n]
+        r_free_p = mesh.vertices[basis.free_vertex_plus[n]]
+        rho_p = centroids[t_p] - r_free_p
+        J[t_p] += I[n] * (l_n / (2.0 * A_p)) * rho_p
+
+        # T- contribution: f_n = (l_n / 2A-) * (r_free- - r)
+        t_m = basis.t_minus[n]
+        A_m = basis.area_minus[n]
+        r_free_m = mesh.vertices[basis.free_vertex_minus[n]]
+        rho_m = r_free_m - centroids[t_m]
+        J[t_m] += I[n] * (l_n / (2.0 * A_m)) * rho_m
+
+    J_mag = np.linalg.norm(J, axis=1).real
+
+    if component == 'real':
+        J_vectors = J.real
+    else:
+        J_vectors = J.imag
+
+    return J_vectors, J_mag, centroids
+
+
 def plot_surface_current(
     I: np.ndarray,
     basis: RWGBasis,
@@ -353,5 +419,201 @@ def plot_surface_current(
     # Add colorbar to the figure
     cbar = ax.figure.colorbar(sm, ax=ax, shrink=0.6, pad=0.1)
     cbar.set_label(label)
+
+    return ax, sm
+
+
+def _subsample_indices(
+    J_mag: np.ndarray,
+    max_arrows: Optional[int],
+    method: str = 'magnitude',
+) -> np.ndarray:
+    """Select indices for subsampling arrows.
+
+    Parameters
+    ----------
+    J_mag : ndarray, shape (N,)
+        Current density magnitudes.
+    max_arrows : int or None
+        Maximum number of arrows. If None or >= len(J_mag), return all indices.
+    method : str, default 'magnitude'
+        Subsampling method: 'magnitude' keeps highest |J|, 'uniform' picks random.
+
+    Returns
+    -------
+    indices : ndarray
+        Selected triangle indices.
+    """
+    num_tri = len(J_mag)
+    if max_arrows is None or num_tri <= max_arrows:
+        return np.arange(num_tri)
+
+    if method == 'magnitude':
+        return np.argsort(J_mag)[-max_arrows:]
+    else:  # 'uniform'
+        return np.random.choice(num_tri, max_arrows, replace=False)
+
+
+def plot_surface_current_vectors(
+    I: np.ndarray,
+    basis: RWGBasis,
+    mesh: Mesh,
+    ax: Optional[plt.Axes] = None,
+    component: str = 'real',
+    scale: float = 1.0,
+    normalize: bool = False,
+    subsample: Optional[int] = None,
+    subsample_method: str = 'magnitude',
+    color_by_magnitude: bool = True,
+    cmap: str = 'viridis',
+    arrow_color: str = 'black',
+    arrow_width: float = 1.5,
+    show_mesh: bool = True,
+    mesh_alpha: float = 0.3,
+    mesh_color: str = 'lightgray',
+    title: Optional[str] = None,
+    clim: Optional[tuple] = None,
+) -> tuple:
+    """Plot surface current density as 3D vector arrows on the mesh.
+
+    Parameters
+    ----------
+    I : ndarray, shape (N,), complex128
+        RWG basis function coefficients from the MoM solve.
+    basis : RWGBasis
+        RWG basis function data.
+    mesh : Mesh
+        Surface mesh.
+    ax : matplotlib 3D axes, optional
+        If None, creates a new figure.
+    component : str, default 'real'
+        Which part of complex J to show: 'real' or 'imag'.
+    scale : float, default 1.0
+        Arrow length multiplier (auto-scaled to ~5% of mesh size).
+    normalize : bool, default False
+        If True, all arrows have same length (direction only).
+    subsample : int, optional
+        Maximum number of arrows. If None, plots all triangles.
+    subsample_method : str, default 'magnitude'
+        'magnitude' keeps highest |J|, 'uniform' picks random triangles.
+    color_by_magnitude : bool, default True
+        If True, color arrows by |J| using colormap. Otherwise use arrow_color.
+    cmap : str, default 'viridis'
+        Matplotlib colormap name (used if color_by_magnitude=True).
+    arrow_color : str, default 'black'
+        Uniform arrow color (used if color_by_magnitude=False).
+    arrow_width : float, default 1.5
+        Line width for arrows.
+    show_mesh : bool, default True
+        Whether to render underlying mesh surface.
+    mesh_alpha : float, default 0.3
+        Transparency of mesh surface.
+    mesh_color : str, default 'lightgray'
+        Color of mesh surface.
+    title : str, optional
+        Plot title. Auto-generated if None.
+    clim : tuple of (vmin, vmax), optional
+        Color limits for magnitude coloring. Auto-scaled if None.
+
+    Returns
+    -------
+    ax : matplotlib 3D axes
+    mappable : ScalarMappable or None
+        For creating a colorbar (None if color_by_magnitude=False).
+    """
+    # Compute current vectors
+    J_vectors, J_mag, centroids = compute_triangle_current_vectors(
+        I, basis, mesh, component=component
+    )
+
+    # Subsample if requested
+    indices = _subsample_indices(J_mag, subsample, subsample_method)
+    J_vectors = J_vectors[indices]
+    J_mag_sub = J_mag[indices]
+    centroids = centroids[indices]
+
+    # Compute auto-scale based on mesh size
+    vertices = mesh.vertices
+    mesh_size = np.array([
+        vertices[:, 0].max() - vertices[:, 0].min(),
+        vertices[:, 1].max() - vertices[:, 1].min(),
+        vertices[:, 2].max() - vertices[:, 2].min(),
+    ]).max()
+
+    J_mag_max = J_mag_sub.max() if J_mag_sub.max() > 0 else 1.0
+    arrow_scale = 0.05 * mesh_size * scale / J_mag_max
+
+    # Normalize vectors if requested
+    if normalize:
+        norms = np.linalg.norm(J_vectors, axis=1, keepdims=True)
+        norms = np.where(norms > 0, norms, 1.0)
+        J_vectors = J_vectors / norms
+        arrow_scale = 0.05 * mesh_size * scale
+
+    # Create figure if needed
+    if ax is None:
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+
+    # Draw mesh surface if requested
+    if show_mesh:
+        triangles_3d = [mesh.vertices[tri] for tri in mesh.triangles]
+        collection = Poly3DCollection(
+            triangles_3d,
+            facecolors=mesh_color,
+            edgecolors='gray',
+            linewidths=0.3,
+            alpha=mesh_alpha,
+        )
+        ax.add_collection3d(collection)
+
+    # Prepare arrow colors
+    sm = None
+    if color_by_magnitude:
+        if clim is not None:
+            vmin, vmax = clim
+        else:
+            vmin, vmax = J_mag_sub.min(), J_mag_sub.max()
+
+        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        colormap = plt.get_cmap(cmap)
+        colors = colormap(norm(J_mag_sub))
+
+        sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
+        sm.set_array([])
+    else:
+        colors = arrow_color
+
+    # Draw quiver arrows
+    ax.quiver(
+        centroids[:, 0], centroids[:, 1], centroids[:, 2],
+        J_vectors[:, 0] * arrow_scale,
+        J_vectors[:, 1] * arrow_scale,
+        J_vectors[:, 2] * arrow_scale,
+        colors=colors,
+        linewidth=arrow_width,
+        arrow_length_ratio=0.3,
+        normalize=False,
+    )
+
+    # Set axis limits with equal aspect ratio
+    max_range = np.array([
+        vertices[:, 0].max() - vertices[:, 0].min(),
+        vertices[:, 1].max() - vertices[:, 1].min(),
+        vertices[:, 2].max() - vertices[:, 2].min(),
+    ]).max() / 2.0
+    mid = (vertices.max(axis=0) + vertices.min(axis=0)) * 0.5
+    ax.set_xlim(mid[0] - max_range, mid[0] + max_range)
+    ax.set_ylim(mid[1] - max_range, mid[1] + max_range)
+    ax.set_zlim(mid[2] - max_range, mid[2] + max_range)
+
+    ax.set_xlabel('X (m)')
+    ax.set_ylabel('Y (m)')
+    ax.set_zlabel('Z (m)')
+
+    if title is None:
+        component_label = 'Real' if component == 'real' else 'Imag'
+        title = f'Surface current vectors ({component_label}(J)), {basis.num_basis} basis functions'
+    ax.set_title(title)
 
     return ax, sm

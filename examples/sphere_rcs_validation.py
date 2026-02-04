@@ -4,7 +4,8 @@ Example: PEC Sphere RCS — MoM vs Mie Series Validation
 Produces:
   Figure 1 Left:  Monostatic RCS (dBsm) vs frequency
   Figure 1 Right: Bistatic RCS (dBsm) vs elevation angle at a single frequency
-  Figure 2: Induced surface current density on the sphere
+  Figure 2: Induced surface current density on the sphere (scalar heatmap)
+  Figure 3: Surface current vectors on the sphere (3D arrows)
 """
 
 import sys
@@ -26,6 +27,7 @@ from pyMoM3d import (
     compute_rcs,
     plot_mesh_3d,
     plot_surface_current,
+    plot_surface_current_vectors,
     eta0,
     c0,
 )
@@ -180,6 +182,24 @@ def main():
     ax_curr.view_init(elev=30, azim=-60)
     output_file = os.path.join(images_dir, 'sphere_surface_current.png')
     fig2.savefig(output_file, dpi=150, bbox_inches='tight')
+    print(f"Saved plot to: {output_file}")
+
+    # Figure 3: Surface current vectors
+    fig3 = plt.figure(figsize=(10, 8))
+    ax_vec = fig3.add_subplot(111, projection='3d')
+    ax_vec, sm = plot_surface_current_vectors(
+        I_bi, basis, mesh, ax=ax_vec,
+        subsample=300,
+        subsample_method='magnitude',
+        cmap='plasma',
+        scale=1.5,
+        title=(f'Surface current vectors on PEC sphere\n'
+               f'f = {f_bistatic/1e9:.1f} GHz, Real(J) at t=0'),
+    )
+    plt.colorbar(sm, ax=ax_vec, label='|J| (A/m)', shrink=0.6)
+    ax_vec.view_init(elev=30, azim=-60)
+    output_file = os.path.join(images_dir, 'sphere_surface_current_vectors.png')
+    fig3.savefig(output_file, dpi=150, bbox_inches='tight')
     print(f"Saved plot to: {output_file}")
 
     plt.show()

@@ -307,6 +307,84 @@ Estimate 3dB beamwidth from a principal-plane cut.
 
 ---
 
+## `pyMoM3d.analysis.cma` — Characteristic Mode Analysis
+
+### `CMAResult` (dataclass)
+
+Result container for Characteristic Mode Analysis at a single frequency.
+
+**Attributes:**
+
+| Attribute | Type | Description |
+|---|---|---|
+| `frequency` | float | Frequency (Hz) at which CMA was computed |
+| `eigenvalues` | `ndarray (N,)` | Characteristic eigenvalues λ_n (real) |
+| `eigenvectors` | `ndarray (N, N)` | Characteristic currents J_n as columns, power-normalized |
+| `modal_significance` | `ndarray (N,)` | Modal significance MS_n = \|1/(1+jλ_n)\| |
+| `characteristic_angle` | `ndarray (N,)` | Characteristic angle α_n in degrees |
+| `R_matrix` | `ndarray (N, N)` | Radiation resistance matrix Re(Z) |
+| `X_matrix` | `ndarray (N, N)` | Reactance matrix Im(Z) |
+| `sort_order` | `ndarray (N,)` | Indices that sort modes by decreasing modal significance |
+
+**Methods:**
+- `get_mode(n)` -> `ndarray (N,)` — Get the nth most significant characteristic current
+- `get_eigenvalue(n)` -> float — Get eigenvalue of nth most significant mode
+- `get_modal_significance(n)` -> float — Get modal significance of nth most significant mode
+- `get_characteristic_angle(n)` -> float — Get characteristic angle (degrees) of nth most significant mode
+
+### `compute_characteristic_modes(Z, frequency=0.0, num_modes=None, regularization=1e-10)` -> CMAResult
+
+Main entry point for CMA. Computes characteristic modes from an impedance matrix.
+
+- `Z` (`ndarray (N, N)`, complex): Impedance matrix from `fill_impedance_matrix()`
+- `frequency` (float): Frequency for metadata
+- `num_modes` (int, optional): Number of modes to retain (sorted by significance). If None, returns all N modes.
+- `regularization` (float): Regularization factor for R matrix
+
+### `solve_cma(Z, regularization=1e-10, check_conditioning=True)` -> CMAResult
+
+Low-level CMA solver. Decomposes Z = R + jX and solves the generalized eigenvalue problem X·J = λ·R·J.
+
+### `compute_modal_significance(eigenvalues)` -> `ndarray`
+
+Compute modal significance: MS_n = 1 / sqrt(1 + λ_n²)
+
+### `compute_characteristic_angle(eigenvalues)` -> `ndarray`
+
+Compute characteristic angle: α_n = 180° - arctan(λ_n)
+
+### `track_modes_across_frequency(cma_results, correlation_threshold=0.7)` -> list of ndarray
+
+Track characteristic modes across frequency using eigenvector correlation.
+
+- `cma_results` (list of CMAResult): CMA results at multiple frequencies
+- `correlation_threshold` (float): Minimum correlation for valid mode match
+- Returns list of index arrays for mode tracking
+
+### `verify_orthogonality(cma_result, tolerance=1e-6)` -> `(bool, float)`
+
+Verify R-orthogonality: J_m^H · R · J_n = δ_mn. Returns (is_orthogonal, max_error).
+
+### `verify_eigenvalue_reality(cma_result, tolerance=1e-10)` -> `(bool, float)`
+
+Verify eigenvalues are real. Returns (are_real, max_imaginary_part).
+
+### `compute_modal_excitation_coefficient(cma_result, V, mode_index)` -> complex
+
+Compute modal excitation coefficient α_n = V^T · J_n / (1 + j·λ_n).
+
+### `expand_current_in_modes(cma_result, I, num_modes=None)` -> `(coefficients, reconstruction)`
+
+Expand a driven current in terms of characteristic modes.
+
+- Returns `coefficients` (mode weights) and `reconstruction` (approximated current)
+
+### `cma_frequency_sweep(basis, mesh, frequencies, eta, quad_order=4, near_threshold=0.2, num_modes=None, track_modes=True, progress_callback=None)` -> `(list of CMAResult, tracked_indices or None)`
+
+Perform CMA across a frequency sweep with optional mode tracking.
+
+---
+
 ## `pyMoM3d.visualization` — Plotting
 
 ### `plot_mesh_3d(mesh, ax=None, show_edges=True, show_normals=False, ...)`  -> Axes3D
@@ -332,6 +410,40 @@ Plot surface current density `|J|` as a 3D heatmap on the mesh.
 ### `compute_triangle_current_density(I, basis, mesh)` -> `ndarray (N_t,) float64`
 
 Compute `|J|` at each triangle centroid. Useful for exporting current data without plotting.
+
+### `compute_triangle_current_vectors(I, basis, mesh, component='real')` -> `(J_vectors, J_mag, centroids)`
+
+Compute surface current density vectors J(r) at each triangle centroid.
+
+- `I` (`ndarray (N,) complex128`): RWG coefficients from the solve
+- `component` (str): `'real'` or `'imag'` — which part of complex current to return
+- Returns tuple of:
+  - `J_vectors` (`ndarray (N_t, 3) float64`): Current vectors at each centroid
+  - `J_mag` (`ndarray (N_t,) float64`): Current magnitudes
+  - `centroids` (`ndarray (N_t, 3) float64`): Centroid positions
+
+### `plot_surface_current_vectors(I, basis, mesh, ax=None, ...)` -> `(ax, ScalarMappable or None)`
+
+Plot surface current density as 3D vector arrows on the mesh using matplotlib quiver.
+
+**Parameters:**
+- `I` (`ndarray (N,) complex128`): RWG coefficients from the solve
+- `component` (str): `'real'` or `'imag'` — which part of complex J to show. Default `'real'`.
+- `scale` (float): Arrow length multiplier (auto-scaled to ~5% of mesh size). Default 1.0.
+- `normalize` (bool): If True, all arrows have same length (direction only). Default False.
+- `subsample` (int): Maximum number of arrows. If None, plots all triangles.
+- `subsample_method` (str): `'magnitude'` keeps highest |J|, `'uniform'` picks random. Default `'magnitude'`.
+- `color_by_magnitude` (bool): If True, color arrows by |J| using colormap. Default True.
+- `cmap` (str): Matplotlib colormap name. Default `'viridis'`.
+- `arrow_color` (str): Uniform arrow color (used if `color_by_magnitude=False`). Default `'black'`.
+- `arrow_width` (float): Line width for arrows. Default 1.5.
+- `show_mesh` (bool): Whether to render underlying mesh surface. Default True.
+- `mesh_alpha` (float): Transparency of mesh surface. Default 0.3.
+- `mesh_color` (str): Color of mesh surface. Default `'lightgray'`.
+- `title` (str): Plot title. Auto-generated if None.
+- `clim` (tuple): `(vmin, vmax)` for color limits. Auto-scaled if None.
+
+**Returns:** The axes and a ScalarMappable (for custom colorbar placement), or None if `color_by_magnitude=False`.
 
 ---
 
@@ -364,6 +476,8 @@ Provide either `geometry` (a primitive) or a pre-built `mesh`. The constructor m
 **Methods:**
 - `run()` -> SimulationResult — single-frequency solve
 - `sweep(frequencies)` -> list of SimulationResult — multi-frequency sweep (mesh reused)
+- `compute_cma(frequency=None, num_modes=None)` -> CMAResult — Characteristic Mode Analysis at a single frequency
+- `cma_sweep(frequencies, num_modes=None, track_modes=True)` -> `(list of CMAResult, tracked_indices)` — CMA frequency sweep with mode tracking
 
 ### `load_stl(path, mesher='trimesh')` -> Mesh
 

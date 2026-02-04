@@ -276,6 +276,108 @@ basis = sim.basis  # access basis functions after construction
 
 ---
 
+## 7. CMA Plate Example (`cma_plate_example.py`)
+
+**Purpose:** Demonstrates Characteristic Mode Analysis on a rectangular plate, showing modal currents, eigenvalue spectra, and modal significance vs frequency.
+
+**What it does:**
+
+1. Creates a 15 cm × 10 cm rectangular plate meshed with Gmsh
+2. At 1 GHz: computes all characteristic modes, displays top 6 by modal significance
+3. Visualizes the first 4 modal currents as 3D heatmaps
+4. Performs frequency sweep (0.5–2.0 GHz) to track eigenvalues and modal significance
+
+**Key output:**
+- Table of eigenvalues (λ_n), modal significance (MS), and characteristic angles (α)
+- Mode status: resonant (λ≈0), inductive (λ>0), or capacitive (λ<0)
+
+**Generated plots** (`images/`):
+
+| File | Content |
+|---|---|
+| `cma_plate_modes.png` | First 4 characteristic modal currents |
+| `cma_plate_spectrum.png` | Eigenvalue and modal significance vs frequency |
+
+**Relevant code pattern — CMA workflow:**
+
+```python
+from pyMoM3d import (
+    RectangularPlate, GmshMesher, compute_rwg_connectivity,
+    fill_impedance_matrix, compute_characteristic_modes,
+    verify_orthogonality, plot_surface_current, eta0, c0,
+)
+
+# Mesh
+plate = RectangularPlate(width=0.15, height=0.10)
+mesh = GmshMesher(target_edge_length=0.015).mesh_from_geometry(plate)
+basis = compute_rwg_connectivity(mesh)
+
+# Compute impedance matrix
+k = 2 * np.pi * 1e9 / c0
+Z = fill_impedance_matrix(basis, mesh, k, eta0)
+
+# Characteristic Mode Analysis
+cma = compute_characteristic_modes(Z, frequency=1e9)
+
+# Access modes by significance rank
+J_mode1 = cma.get_mode(0)  # Most significant mode
+ms_1 = cma.get_modal_significance(0)
+lambda_1 = cma.get_eigenvalue(0)
+alpha_1 = cma.get_characteristic_angle(0)
+
+# Visualize modal current
+plot_surface_current(J_mode1, basis, mesh, title=f'Mode 1: λ={lambda_1:.2f}')
+```
+
+---
+
+## 8. CMA Sphere Validation (`cma_sphere_validation.py`)
+
+**Purpose:** Validates CMA on a PEC sphere by comparing computed resonances against theoretical Mie series predictions. Sphere modes correspond to spherical harmonics.
+
+**What it does:**
+
+1. Creates a sphere mesh (radius 10 cm) using Gmsh
+2. Sweeps ka (electrical size) from 0.5 to 4.0 (31 points)
+3. At each frequency: computes CMA, extracts top 10 mode eigenvalues and modal significance
+4. Identifies zero-crossings of λ_n(f) as resonant frequencies
+5. Compares detected resonances against theoretical TM mode zeros from spherical Bessel functions
+
+**Key concepts:**
+- TM₁ (dipole) mode resonates at ka ≈ 2.74 (first zero of j₁(ka))
+- Sphere modes are degenerate due to symmetry (e.g., 3-fold degeneracy for dipole)
+
+**Generated plots** (`images/`):
+
+| File | Content |
+|---|---|
+| `cma_sphere_spectrum.png` | Eigenvalue and modal significance vs ka with theoretical markers |
+| `cma_sphere_modes.png` | First 4 modal currents on sphere |
+
+**Relevant code pattern — using Simulation class for CMA:**
+
+```python
+from pyMoM3d import Simulation, SimulationConfig, PlaneWaveExcitation, Sphere
+
+# Create simulation (excitation required but not used for CMA)
+exc = PlaneWaveExcitation(E0=np.array([1, 0, 0]), k_hat=np.array([0, 0, -1]))
+config = SimulationConfig(frequency=1e9, excitation=exc)
+sim = Simulation(config, geometry=Sphere(radius=0.1), mesher='gmsh', target_edge_length=0.025)
+
+# Single-frequency CMA
+cma = sim.compute_cma(frequency=1e9, num_modes=10)
+
+# CMA frequency sweep with mode tracking
+frequencies = np.linspace(0.5e9, 2e9, 21).tolist()
+cma_results, tracked_indices = sim.cma_sweep(frequencies, num_modes=10, track_modes=True)
+
+# Access tracked mode 0 eigenvalue across frequency
+lambda_mode0 = [cma_results[i].eigenvalues[tracked_indices[i][0]]
+                for i in range(len(cma_results))]
+```
+
+---
+
 ## Writing Your Own Simulations
 
 ### Template: Scattering Problem
@@ -392,6 +494,7 @@ The test suite is organized by module:
 | `test_solver.py` | Excitation vectors, direct/GMRES solvers, surface current eval |
 | `test_far_field.py` | Far-field computation, RCS, Mie series validation |
 | `test_simulation.py` | Simulation driver, frequency sweep, save/load, analysis utilities |
+| `test_cma.py` | CMA eigenvalues, orthogonality, modal significance, mode tracking |
 
 Run all tests:
 
