@@ -17,6 +17,7 @@ env/
 CLAUDE.md
 .idea/
 .vscode/
+.gitignore
 *.swp
 *.swo
 *~
