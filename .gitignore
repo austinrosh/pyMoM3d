@@ -47,6 +47,7 @@ docs/roadmap.md
 docs/theory_of_operation.md
 /plans
 docs/api-reference.md
+CONVENTIONS.md
 
 # Personal utility scripts
 examples/freq_finder.py
