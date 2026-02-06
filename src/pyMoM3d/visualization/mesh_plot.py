@@ -93,29 +93,30 @@ def plot_mesh_3d(
     ax.set_ylim([vertices[:, 1].min(), vertices[:, 1].max()])
     ax.set_zlim([vertices[:, 2].min(), vertices[:, 2].max()])
     
-    # Set labels
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    
+    # Set labels with LaTeX formatting
+    ax.set_xlabel(r'$x$ (m)')
+    ax.set_ylabel(r'$y$ (m)')
+    ax.set_zlabel(r'$z$ (m)')
+
     # Equal aspect ratio
     max_range = np.array([
         vertices[:, 0].max() - vertices[:, 0].min(),
         vertices[:, 1].max() - vertices[:, 1].min(),
         vertices[:, 2].max() - vertices[:, 2].min()
     ]).max() / 2.0
-    
+
     mid_x = (vertices[:, 0].max() + vertices[:, 0].min()) * 0.5
     mid_y = (vertices[:, 1].max() + vertices[:, 1].min()) * 0.5
     mid_z = (vertices[:, 2].max() + vertices[:, 2].min()) * 0.5
-    
+
     ax.set_xlim(mid_x - max_range, mid_x + max_range)
     ax.set_ylim(mid_y - max_range, mid_y + max_range)
     ax.set_zlim(mid_z - max_range, mid_z + max_range)
-    
-    ax.set_title(f'Mesh: {mesh.get_num_vertices()} vertices, '
-                 f'{mesh.get_num_triangles()} triangles, '
-                 f'{mesh.get_num_edges()} edges')
+
+    n_v = mesh.get_num_vertices()
+    n_t = mesh.get_num_triangles()
+    n_e = mesh.get_num_edges()
+    ax.set_title(rf'Mesh: $N_v = {n_v}$, $N_t = {n_t}$, $N_e = {n_e}$')
     
     return ax
 
@@ -180,12 +181,13 @@ def plot_mesh(
         ax.fill(x, y, color=color, alpha=alpha, edgecolor=edge_color if show_edges else 'none',
                 linewidth=edge_width if show_edges else 0)
 
-    # Set labels
-    labels = ['X', 'Y', 'Z']
+    # Set labels with LaTeX formatting
+    labels = [r'$x$ (m)', r'$y$ (m)', r'$z$ (m)']
     ax.set_xlabel(labels[idx1])
     ax.set_ylabel(labels[idx2])
-    ax.set_title(f'Mesh projection ({projection}): {mesh.get_num_vertices()} vertices, '
-                 f'{mesh.get_num_triangles()} triangles')
+    n_v = mesh.get_num_vertices()
+    n_t = mesh.get_num_triangles()
+    ax.set_title(rf'Mesh projection ({projection}): $N_v = {n_v}$, $N_t = {n_t}$')
     ax.set_aspect('equal')
     ax.grid(True, alpha=0.3)
 
@@ -360,10 +362,10 @@ def plot_surface_current(
 
     if log_scale:
         values = 10.0 * np.log10(np.maximum(J_mag, 1e-30))
-        label = '|J| (dB A/m)'
+        label = r'$|\mathbf{J}|$ (dB A/m)'
     else:
         values = J_mag
-        label = '|J| (A/m)'
+        label = r'$|\mathbf{J}|$ (A/m)'
 
     if clim is not None:
         vmin, vmax = clim
@@ -404,12 +406,12 @@ def plot_surface_current(
     ax.set_ylim(mid[1] - max_range, mid[1] + max_range)
     ax.set_zlim(mid[2] - max_range, mid[2] + max_range)
 
-    ax.set_xlabel('X (m)')
-    ax.set_ylabel('Y (m)')
-    ax.set_zlabel('Z (m)')
+    ax.set_xlabel(r'$x$ (m)')
+    ax.set_ylabel(r'$y$ (m)')
+    ax.set_zlabel(r'$z$ (m)')
 
     if title is None:
-        title = f'Surface current density, {basis.num_basis} basis functions'
+        title = rf'Surface current density $|\mathbf{{J}}|$, $N = {basis.num_basis}$'
     ax.set_title(title)
 
     # ScalarMappable for colorbar
@@ -607,13 +609,16 @@ def plot_surface_current_vectors(
     ax.set_ylim(mid[1] - max_range, mid[1] + max_range)
     ax.set_zlim(mid[2] - max_range, mid[2] + max_range)
 
-    ax.set_xlabel('X (m)')
-    ax.set_ylabel('Y (m)')
-    ax.set_zlabel('Z (m)')
+    ax.set_xlabel(r'$x$ (m)')
+    ax.set_ylabel(r'$y$ (m)')
+    ax.set_zlabel(r'$z$ (m)')
 
     if title is None:
-        component_label = 'Real' if component == 'real' else 'Imag'
-        title = f'Surface current vectors ({component_label}(J)), {basis.num_basis} basis functions'
+        if component == 'real':
+            component_label = r'$\mathrm{Re}(\mathbf{J})$'
+        else:
+            component_label = r'$\mathrm{Im}(\mathbf{J})$'
+        title = rf'Surface current vectors {component_label}, $N = {basis.num_basis}$'
     ax.set_title(title)
 
     return ax, sm

@@ -29,9 +29,13 @@ from pyMoM3d import (
     compute_characteristic_modes,
     verify_orthogonality,
     plot_surface_current,
+    configure_latex_style,
     eta0,
     c0,
 )
+
+# Configure LaTeX-style plotting
+configure_latex_style()
 
 
 def main():
@@ -124,12 +128,13 @@ def main():
         ax = axes[n]
         plot_surface_current(
             J_n, basis, mesh, ax=ax, cmap='hot',
-            title=f'Mode {n+1}: λ={lambda_n:.2f}, MS={ms_n:.3f}',
+            title=rf'Mode {n+1}: $\lambda = {lambda_n:.2f}$, MS $= {ms_n:.3f}$',
         )
         ax.view_init(elev=60, azim=-45)
 
-    fig.suptitle(f'Characteristic Modes of {plate_width*100:.0f}x{plate_height*100:.0f} cm Plate\n'
-                 f'f = {f_analysis/1e9:.2f} GHz, N = {basis.num_basis} basis functions',
+    fig.suptitle(rf'Characteristic Modes of ${plate_width*100:.0f} \times {plate_height*100:.0f}$ cm Plate'
+                 '\n'
+                 rf'$f = {f_analysis/1e9:.2f}$ GHz, $N = {basis.num_basis}$',
                  fontsize=14)
     fig.tight_layout()
 
@@ -165,30 +170,30 @@ def main():
 
     for n in range(num_track):
         ax1.plot(freq_ghz, eigenvalues_vs_freq[:, n], 'o-',
-                 color=colors[n], label=f'Mode {n+1}', markersize=4)
+                 color=colors[n], label=rf'Mode {n+1}', markersize=4)
 
-    ax1.axhline(0, color='k', linestyle='--', alpha=0.3, label='Resonance (λ=0)')
-    ax1.set_xlabel('Frequency (GHz)')
-    ax1.set_ylabel('Eigenvalue λ_n')
-    ax1.set_title('Characteristic Eigenvalues vs Frequency')
+    ax1.axhline(0, color='k', linestyle='--', alpha=0.3, label=r'Resonance ($\lambda = 0$)')
+    ax1.set_xlabel(r'Frequency $f$ (GHz)')
+    ax1.set_ylabel(r'Eigenvalue $\lambda_n$')
+    ax1.set_title(r'Characteristic Eigenvalues vs Frequency')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     ax1.set_xlim([freq_ghz[0], freq_ghz[-1]])
 
     for n in range(num_track):
         ax2.plot(freq_ghz, ms_vs_freq[:, n], 'o-',
-                 color=colors[n], label=f'Mode {n+1}', markersize=4)
+                 color=colors[n], label=rf'Mode {n+1}', markersize=4)
 
-    ax2.axhline(0.707, color='k', linestyle='--', alpha=0.3, label='MS=0.707')
-    ax2.set_xlabel('Frequency (GHz)')
-    ax2.set_ylabel('Modal Significance')
-    ax2.set_title('Modal Significance vs Frequency')
+    ax2.axhline(0.707, color='k', linestyle='--', alpha=0.3, label=r'MS $= 0.707$')
+    ax2.set_xlabel(r'Frequency $f$ (GHz)')
+    ax2.set_ylabel(r'Modal Significance MS$_n$')
+    ax2.set_title(r'Modal Significance vs Frequency')
     ax2.legend()
     ax2.grid(True, alpha=0.3)
     ax2.set_xlim([freq_ghz[0], freq_ghz[-1]])
     ax2.set_ylim([0, 1.05])
 
-    fig2.suptitle(f'CMA Frequency Sweep: {plate_width*100:.0f}x{plate_height*100:.0f} cm Plate',
+    fig2.suptitle(rf'CMA Frequency Sweep: ${plate_width*100:.0f} \times {plate_height*100:.0f}$ cm Plate',
                   fontsize=14)
     fig2.tight_layout()
 

@@ -23,9 +23,13 @@ from pyMoM3d import (
     PlaneWaveExcitation,
     compute_far_field,
     compute_rcs,
+    configure_latex_style,
     eta0,
     c0,
 )
+
+# Configure LaTeX-style plotting
+configure_latex_style()
 
 
 def main():
@@ -102,9 +106,9 @@ def main():
     fig, ax = plt.subplots(figsize=(8, 5))
     theta_deg = np.degrees(theta)
     ax.plot(theta_deg, rcs, 'b-', linewidth=1.5)
-    ax.set_xlabel('Theta (deg)')
-    ax.set_ylabel('RCS (dBsm)')
-    ax.set_title(f'Sphere RCS via Simulation driver, f={frequency/1e9:.1f} GHz')
+    ax.set_xlabel(r'$\theta$ (deg)')
+    ax.set_ylabel(r'RCS $\sigma$ (dBsm)')
+    ax.set_title(rf'Sphere RCS via Simulation Driver, $f = {frequency/1e9:.1f}$ GHz')
     ax.grid(True, alpha=0.3)
     ax.set_xlim([0, 180])
 

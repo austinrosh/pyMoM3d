@@ -67,6 +67,8 @@ The library follows a pipeline: **Geometry → Mesh → RWG Basis → Z-Fill →
 
 **`visualization/mesh_plot.py`** - `plot_mesh_3d()` for 3D surface rendering, `plot_mesh()` for 2D, `plot_surface_current()` for current density heatmaps (works with both driven currents and CMA modal currents)
 
+**`visualization/plot_style.py`** - `configure_latex_style()` for LaTeX rendering configuration, label formatters (`format_frequency_label()`, `format_rcs_label()`, etc.), and title helpers for consistent scientific notation
+
 **`utils/reporter.py`** - `TerminalReporter`, `SilentReporter`, `RecordingReporter` for progress reporting
 
 **`utils/report_writer.py`** - `write_report()` generates structured text simulation reports
@@ -144,6 +146,99 @@ From `.cursorrules`:
 - **Units**: Meters for length, Hz for frequency
 - **MoM guidance**: Validate mesh density (warn if < 10 elements/λ)
 - **Constants**: Use physical constants from `utils/constants.py`
+
+## LaTeX Plotting Style
+
+pyMoM3d uses publication-quality LaTeX-rendered text in all plots. The centralized configuration is in `visualization/plot_style.py`.
+
+### Configuration
+
+Enable LaTeX rendering at the start of any plotting script:
+
+```python
+from pyMoM3d import configure_latex_style
+
+# Auto-detect LaTeX installation (falls back to mathtext if unavailable)
+configure_latex_style()
+
+# Or explicitly disable full LaTeX rendering
+configure_latex_style(use_tex=False)
+```
+
+### Dependencies
+
+- **Required**: matplotlib (included in requirements.txt)
+- **Optional**: Full LaTeX installation (texlive, mactex, etc.) for `use_tex=True`
+- **Fallback**: If LaTeX is not installed, matplotlib's built-in mathtext renderer is used automatically
+
+### Notation Conventions
+
+All plots follow consistent scientific notation:
+
+| Element | Convention | Example |
+|---------|------------|---------|
+| Vectors | Boldface | `$\mathbf{J}$`, `$\mathbf{E}$` |
+| Scalars | Italic | `$f$`, `$k$`, `$\lambda$` |
+| Units | Roman font | `$\mathrm{A/m}$`, `$\mathrm{Hz}$` |
+| Subscripts (labels) | Roman | `$R_{\mathrm{in}}$`, `$f_{\mathrm{res}}$` |
+| Subscripts (indices) | Italic | `$\lambda_n$`, `$J_m$` |
+
+### Label Helpers
+
+Use the provided label formatters for consistency:
+
+```python
+from pyMoM3d import (
+    format_frequency_label,    # → 'Frequency $f$ (GHz)'
+    format_rcs_label,          # → 'RCS $\sigma$ (dBsm)'
+    format_impedance_label,    # → '$R_{\mathrm{in}}$ ($\Omega$)'
+    format_current_label,      # → '$|\mathbf{J}|$ (A/m)'
+    format_eigenvalue_label,   # → 'Eigenvalue $\lambda_n$'
+    format_angle_label,        # → '$\theta$ (deg)'
+)
+
+ax.set_xlabel(format_frequency_label())
+ax.set_ylabel(format_rcs_label())
+```
+
+### Examples of Proper LaTeX Usage
+
+```python
+# Axis labels
+ax.set_xlabel(r'Frequency $f$ (GHz)')
+ax.set_ylabel(r'RCS $\sigma$ (dBsm)')
+ax.set_zlabel(r'$z$ (m)')
+
+# Titles
+ax.set_title(rf'Bistatic RCS at $f = {freq/1e9:.1f}$ GHz ($ka = {ka:.2f}$)')
+
+# Legend entries
+ax.plot(x, y, label=rf'MoM ($N = {N}$)')
+
+# Colorbar labels
+cbar.set_label(r'$|\mathbf{J}|$ (A/m)')
+
+# Annotations
+ax.annotate(rf'$f_{{\mathrm{{res}}}} = {f_res:.3f}$ GHz', xy=(x, y), ...)
+```
+
+### Common Mistakes to Avoid
+
+```python
+# WRONG: Plain text in mathematical context
+ax.set_ylabel('|J| (A/m)')          # Should use LaTeX
+ax.set_xlabel('Frequency (GHz)')    # Missing symbol
+
+# CORRECT: LaTeX formatting
+ax.set_ylabel(r'$|\mathbf{J}|$ (A/m)')
+ax.set_xlabel(r'Frequency $f$ (GHz)')
+
+# WRONG: Italic subscript labels
+ax.set_ylabel(r'$R_{in}$')          # 'in' should be roman
+
+# CORRECT: Roman subscript for labels
+ax.set_ylabel(r'$R_{\mathrm{in}}$')
+```
 
 ## Project Status
 

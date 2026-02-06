@@ -36,11 +36,15 @@ from pyMoM3d import (
     TerminalReporter,
     plot_surface_current,
     compute_far_field,
+    configure_latex_style,
     c0,
     eta0,
 )
 from pyMoM3d.mom.excitation import StripDeltaGapExcitation, find_feed_edges
 from pyMoM3d.analysis.pattern_analysis import compute_directivity
+
+# Configure LaTeX-style plotting
+configure_latex_style()
 
 
 def main():
@@ -195,8 +199,9 @@ def main():
 
     # --- Resonance annotation strings ---
     f_res_ghz = f_res / 1e9
-    z_res_label = (f'$f_{{res}}$ = {f_res_ghz:.3f} GHz ($X_{{in}}$=0)\n'
-                   f'$R_{{in}}$ = {R_res:.1f} $\\Omega$')
+    z_res_label = (rf'$f_{{\mathrm{{res}}}} = {f_res_ghz:.3f}$ GHz ($X_{{\mathrm{{in}}}} = 0$)'
+                   '\n'
+                   rf'$R_{{\mathrm{{in}}}} = {R_res:.1f}$ $\Omega$')
 
     # --- Plots ---
     images_dir = os.path.join(os.path.dirname(__file__), '..', 'images')
@@ -220,9 +225,9 @@ def main():
                 fontsize=8, ha='left',
                 bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.8),
                 arrowprops=dict(arrowstyle='->', color='black'))
-    ax.set_xlabel('Frequency (GHz)')
-    ax.set_ylabel(r'$R_{in}$ ($\Omega$)')
-    ax.set_title('Input Resistance')
+    ax.set_xlabel(r'Frequency $f$ (GHz)')
+    ax.set_ylabel(r'$R_{\mathrm{in}}$ ($\Omega$)')
+    ax.set_title(r'Input Resistance')
     ax.grid(True, alpha=0.3)
 
     ax = axes[1]
@@ -236,25 +241,27 @@ def main():
                 fontsize=8, ha='left',
                 bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.8),
                 arrowprops=dict(arrowstyle='->', color='black'))
-    ax.set_xlabel('Frequency (GHz)')
-    ax.set_ylabel(r'$X_{in}$ ($\Omega$)')
-    ax.set_title('Input Reactance')
+    ax.set_xlabel(r'Frequency $f$ (GHz)')
+    ax.set_ylabel(r'$X_{\mathrm{in}}$ ($\Omega$)')
+    ax.set_title(r'Input Reactance')
     ax.grid(True, alpha=0.3)
 
     ax = axes[2]
     ax.plot(freq_GHz, S11_dB, 'g-o', linewidth=1.5, markersize=3)
-    ax.axhline(-10, color='k', linestyle='--', alpha=0.5, label='-10 dB')
+    ax.axhline(-10, color='k', linestyle='--', alpha=0.5, label=r'$-10$ dB')
     ax.axvline(f_res_ghz, color='gray', linestyle='--', alpha=0.5)
     ax.plot(f_res_ghz, S11_res_dB, 'k*', markersize=10, zorder=5)
-    ax.annotate(f'$f_{{res}}$ = {f_res_ghz:.3f} GHz\n|S11| = {S11_res_dB:.1f} dB',
+    ax.annotate(rf'$f_{{\mathrm{{res}}}} = {f_res_ghz:.3f}$ GHz'
+                '\n'
+                rf'$|S_{{11}}| = {S11_res_dB:.1f}$ dB',
                 xy=(f_res_ghz, S11_res_dB), xycoords='data',
                 xytext=(15, 15), textcoords='offset points',
                 fontsize=8, ha='left',
                 bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.8),
                 arrowprops=dict(arrowstyle='->', color='black'))
-    ax.set_xlabel('Frequency (GHz)')
-    ax.set_ylabel('|S11| (dB)')
-    ax.set_title(f'Return Loss (Z0={Z0:.0f} $\\Omega$)')
+    ax.set_xlabel(r'Frequency $f$ (GHz)')
+    ax.set_ylabel(r'$|S_{11}|$ (dB)')
+    ax.set_title(rf'Return Loss ($Z_0 = {Z0:.0f}$ $\Omega$)')
     ax.legend()
     ax.grid(True, alpha=0.3)
 
@@ -272,9 +279,9 @@ def main():
     I_sorted = I_res[sort_idx]
 
     ax_mag.plot(x_sorted, np.abs(I_sorted), 'b-o', linewidth=1.5, markersize=3)
-    ax_mag.set_xlabel('Position along dipole (mm)')
-    ax_mag.set_ylabel('|I_n| (A)')
-    ax_mag.set_title(f'Current magnitude at resonance, f = {f_res/1e9:.3f} GHz')
+    ax_mag.set_xlabel(r'Position along dipole $x$ (mm)')
+    ax_mag.set_ylabel(r'$|I_n|$ (A)')
+    ax_mag.set_title(rf'Current Magnitude at Resonance, $f = {f_res/1e9:.3f}$ GHz')
     ax_mag.grid(True, alpha=0.3)
 
     # Annotate the feed-point spike
@@ -297,7 +304,7 @@ def main():
     ax_curr = fig3.add_subplot(111, projection='3d')
     plot_surface_current(I_res, basis, mesh, ax=ax_curr, cmap='hot',
                          edge_color='gray', edge_width=0.2,
-                         title=f'|J| on dipole at resonance, f = {f_res/1e9:.2f} GHz')
+                         title=rf'$|\mathbf{{J}}|$ on Dipole at Resonance, $f = {f_res/1e9:.2f}$ GHz')
     ax_curr.view_init(elev=25, azim=-60)
     output_file = os.path.join(images_dir, 'dipole_surface_current.png')
     fig3.savefig(output_file, dpi=150, bbox_inches='tight')
@@ -311,11 +318,11 @@ def main():
         subplot_kw={'projection': None})
 
     # Rectangular pattern cuts (dBi)
-    ax_rect.plot(theta_deg, gain_e_dBi, 'b-', linewidth=1.5, label='E-plane (xz)')
-    ax_rect.plot(theta_deg, gain_h_dBi, 'r--', linewidth=1.5, label='H-plane (yz)')
-    ax_rect.set_xlabel('Theta (deg)')
-    ax_rect.set_ylabel('Directivity (dBi)')
-    ax_rect.set_title(f'Radiation pattern, D_max = {D_max_dBi:.1f} dBi')
+    ax_rect.plot(theta_deg, gain_e_dBi, 'b-', linewidth=1.5, label=r'E-plane ($xz$)')
+    ax_rect.plot(theta_deg, gain_h_dBi, 'r--', linewidth=1.5, label=r'H-plane ($yz$)')
+    ax_rect.set_xlabel(r'$\theta$ (deg)')
+    ax_rect.set_ylabel(r'Directivity $D$ (dBi)')
+    ax_rect.set_title(rf'Radiation Pattern, $D_{{\max}} = {D_max_dBi:.1f}$ dBi')
     ax_rect.legend()
     ax_rect.grid(True, alpha=0.3)
     ax_rect.set_xlim([0, 180])
@@ -331,7 +338,7 @@ def main():
     ax_pe.plot(theta_full, gain_e_linear_norm, 'b-', linewidth=1.5)
     ax_pe.set_theta_zero_location('N')
     ax_pe.set_theta_direction(-1)
-    ax_pe.set_title(f'E-plane (xz)\nD_max = {D_max_dBi:.1f} dBi', pad=15)
+    ax_pe.set_title(rf'E-plane ($xz$)' + '\n' + rf'$D_{{\max}} = {D_max_dBi:.1f}$ dBi', pad=15)
 
     # H-plane polar
     gain_h_full = np.concatenate([gain_h, gain_h[::-1]])
@@ -342,9 +349,9 @@ def main():
     ax_ph.plot(theta_full, gain_h_linear_norm, 'r-', linewidth=1.5)
     ax_ph.set_theta_zero_location('N')
     ax_ph.set_theta_direction(-1)
-    ax_ph.set_title('H-plane (yz)', pad=15)
+    ax_ph.set_title(r'H-plane ($yz$)', pad=15)
 
-    fig4.suptitle(f'Radiation pattern at resonance, f = {f_res/1e9:.2f} GHz', fontsize=13)
+    fig4.suptitle(rf'Radiation Pattern at Resonance, $f = {f_res/1e9:.2f}$ GHz', fontsize=13)
     fig4.tight_layout()
     output_file = os.path.join(images_dir, 'dipole_radiation_pattern.png')
     fig4.savefig(output_file, dpi=150, bbox_inches='tight')

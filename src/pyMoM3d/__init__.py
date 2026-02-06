@@ -18,6 +18,24 @@ from .visualization import (
     compute_triangle_current_density,
     plot_surface_current_vectors,
     compute_triangle_current_vectors,
+    # Plot style
+    configure_latex_style,
+    restore_default_style,
+    latex_style,
+    format_frequency_label,
+    format_angle_label,
+    format_rcs_label,
+    format_impedance_label,
+    format_current_label,
+    format_eigenvalue_label,
+    format_modal_significance_label,
+    format_directivity_label,
+    format_coordinate_label,
+    format_rcs_title,
+    format_current_title,
+    format_cma_title,
+    format_resonance_annotation,
+    format_plane_wave_annotation,
 )
 from .utils.constants import c0, mu0, eps0, eta0
 from .utils.reporter import TerminalReporter, SilentReporter, RecordingReporter
@@ -57,6 +75,13 @@ __all__ = [
     # Visualization
     'plot_mesh', 'plot_mesh_3d', 'plot_surface_current', 'compute_triangle_current_density',
     'plot_surface_current_vectors', 'compute_triangle_current_vectors',
+    # Plot style
+    'configure_latex_style', 'restore_default_style', 'latex_style',
+    'format_frequency_label', 'format_angle_label', 'format_rcs_label',
+    'format_impedance_label', 'format_current_label', 'format_eigenvalue_label',
+    'format_modal_significance_label', 'format_directivity_label', 'format_coordinate_label',
+    'format_rcs_title', 'format_current_title', 'format_cma_title',
+    'format_resonance_annotation', 'format_plane_wave_annotation',
     # Constants
     'c0', 'mu0', 'eps0', 'eta0',
     # MoM

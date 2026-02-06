@@ -45,6 +45,7 @@ models/
 docs/roadmap.md
 docs/theory_of_operation.md
 /plans
+docs/api-reference.md
 
 # Personal utility scripts
 examples/freq_finder.py

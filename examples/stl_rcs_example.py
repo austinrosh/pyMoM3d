@@ -28,9 +28,13 @@ from pyMoM3d import (
     PlaneWaveExcitation,
     Simulation,
     SimulationConfig,
+    configure_latex_style,
     eta0,
     c0,
 )
+
+# Configure LaTeX-style plotting
+configure_latex_style()
 
 
 def load_mesh_from_file(path):
@@ -152,7 +156,7 @@ def _exc_subtitle(exc):
     if isinstance(exc, PlaneWaveExcitation):
         pol = _format_vec(exc.E0)
         prop = _format_vec(exc.k_hat)
-        return f'Plane wave: pol E0={pol}, prop k={prop}'
+        return rf'Plane wave: $\mathbf{{E}}_0 = {pol}$, $\hat{{\mathbf{{k}}}} = {prop}$'
     return ''
 
 
@@ -185,8 +189,8 @@ def plot_bistatic_rcs(theta_deg, rcs_dBsm, freq, filename, num_basis,
     rcs_full = np.concatenate([rcs_dBsm, rcs_dBsm[::-1]])
 
     title_lines = [
-        f'Bistatic RCS — {os.path.basename(filename)}',
-        f'f = {freq/1e9:.3f} GHz, N = {num_basis} basis functions',
+        rf'Bistatic RCS $\sigma$ — {os.path.basename(filename)}',
+        rf'$f = {freq/1e9:.3f}$ GHz, $N = {num_basis}$',
     ]
     sub = _exc_subtitle(exc) if exc is not None else ''
     if sub:
@@ -195,7 +199,7 @@ def plot_bistatic_rcs(theta_deg, rcs_dBsm, freq, filename, num_basis,
     fig, ax = plt.subplots(1, 1, subplot_kw={'projection': 'polar'}, figsize=(8, 8))
     ax.plot(theta_rad_full, rcs_full, 'b-', linewidth=1.5)
     ax.set_title('\n'.join(title_lines), pad=20)
-    ax.set_xlabel('RCS (dBsm)')
+    ax.set_xlabel(r'RCS $\sigma$ (dBsm)')
     fig.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches='tight')
     print(f"Saving plots to {output_path}")
@@ -226,9 +230,9 @@ def plot_current(I_coeffs, basis, mesh, freq, filename, output_path,
     """
     scale_label = "dB" if log_scale else "linear"
     title_lines = [
-        f'Induced surface current |J| ({scale_label}) — '
+        rf'Induced Surface Current $|\mathbf{{J}}|$ ({scale_label}) — '
         f'{os.path.basename(filename)}',
-        f'f = {freq/1e9:.3f} GHz, N = {basis.num_basis} basis functions',
+        rf'$f = {freq/1e9:.3f}$ GHz, $N = {basis.num_basis}$',
     ]
     sub = _exc_subtitle(exc) if exc is not None else ''
     if sub:

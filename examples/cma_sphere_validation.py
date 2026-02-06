@@ -34,9 +34,13 @@ from pyMoM3d import (
     compute_characteristic_modes,
     verify_orthogonality,
     plot_surface_current,
+    configure_latex_style,
     eta0,
     c0,
 )
+
+# Configure LaTeX-style plotting
+configure_latex_style()
 
 
 def find_bessel_zeros(n, num_zeros=3):
@@ -170,7 +174,7 @@ def main():
         ax1.plot(ka_values, eigenvalues_vs_ka[:, n], '-',
                  color=colors[n], label=f'Mode {n+1}', linewidth=1.5, alpha=0.8)
 
-    ax1.axhline(0, color='k', linestyle='--', alpha=0.5, label='Resonance')
+    ax1.axhline(0, color='k', linestyle='--', alpha=0.5, label=r'Resonance ($\lambda = 0$)')
 
     # Mark theoretical TM mode resonances
     tm_colors = ['red', 'green', 'purple']
@@ -179,11 +183,11 @@ def main():
         for zero in zeros:
             if ka_min < zero < ka_max:
                 ax1.axvline(zero, color=color, linestyle=':', alpha=0.7,
-                            label=f'TM{n_tm} theory (ka={zero:.2f})')
+                            label=rf'TM$_{n_tm}$ theory ($ka = {zero:.2f}$)')
 
-    ax1.set_xlabel('ka (electrical size)')
-    ax1.set_ylabel('Eigenvalue λ_n')
-    ax1.set_title('Characteristic Eigenvalues vs Electrical Size')
+    ax1.set_xlabel(r'$ka$ (electrical size)')
+    ax1.set_ylabel(r'Eigenvalue $\lambda_n$')
+    ax1.set_title(r'Characteristic Eigenvalues vs Electrical Size')
     ax1.legend(loc='upper right', fontsize=8, ncol=2)
     ax1.grid(True, alpha=0.3)
     ax1.set_xlim([ka_min, ka_max])
@@ -191,18 +195,18 @@ def main():
 
     for n in range(num_track):
         ax2.plot(ka_values, ms_vs_ka[:, n], '-',
-                 color=colors[n], label=f'Mode {n+1}', linewidth=1.5, alpha=0.8)
+                 color=colors[n], label=rf'Mode {n+1}', linewidth=1.5, alpha=0.8)
 
-    ax2.axhline(0.707, color='k', linestyle='--', alpha=0.5, label='MS=0.707')
-    ax2.set_xlabel('ka (electrical size)')
-    ax2.set_ylabel('Modal Significance')
-    ax2.set_title('Modal Significance vs Electrical Size')
+    ax2.axhline(0.707, color='k', linestyle='--', alpha=0.5, label=r'MS $= 0.707$')
+    ax2.set_xlabel(r'$ka$ (electrical size)')
+    ax2.set_ylabel(r'Modal Significance MS$_n$')
+    ax2.set_title(r'Modal Significance vs Electrical Size')
     ax2.legend(loc='lower right', fontsize=8, ncol=2)
     ax2.grid(True, alpha=0.3)
     ax2.set_xlim([ka_min, ka_max])
     ax2.set_ylim([0, 1.05])
 
-    fig.suptitle(f'CMA of PEC Sphere (a={radius*100:.0f} cm, N={basis.num_basis})',
+    fig.suptitle(rf'CMA of PEC Sphere ($a = {radius*100:.0f}$ cm, $N = {basis.num_basis}$)',
                  fontsize=14)
     fig.tight_layout()
 
@@ -223,12 +227,13 @@ def main():
         ax = axes[n]
         plot_surface_current(
             J_n, basis, mesh, ax=ax, cmap='hot',
-            title=f'Mode {n+1}: λ={lambda_n:.2f}, MS={ms_n:.3f}',
+            title=rf'Mode {n+1}: $\lambda = {lambda_n:.2f}$, MS $= {ms_n:.3f}$',
         )
         ax.view_init(elev=30, azim=-60)
 
-    fig2.suptitle(f'Characteristic Modes of PEC Sphere at ka={ka_single}\n'
-                  f'a={radius*100:.0f} cm, N={basis.num_basis} basis functions',
+    fig2.suptitle(rf'Characteristic Modes of PEC Sphere at $ka = {ka_single}$'
+                  '\n'
+                  rf'$a = {radius*100:.0f}$ cm, $N = {basis.num_basis}$',
                   fontsize=14)
     fig2.tight_layout()
 

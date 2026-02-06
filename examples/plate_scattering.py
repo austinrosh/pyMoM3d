@@ -24,9 +24,13 @@ from pyMoM3d import (
     PlaneWaveExcitation,
     solve_direct,
     plot_surface_current,
+    configure_latex_style,
     eta0,
     c0,
 )
+
+# Configure LaTeX-style plotting
+configure_latex_style()
 
 
 def main():
@@ -91,12 +95,10 @@ def main():
     ax = fig.add_subplot(111, projection='3d')
     plot_surface_current(I, basis, mesh, ax=ax, cmap='hot',
                          edge_color='gray', edge_width=0.3,
-                         title=(f'Induced surface current |J| on {width/wavelength:.1f}'
-                                r'$\lambda$ x '
-                                f'{height/wavelength:.1f}'
-                                r'$\lambda$ PEC plate'
-                                f'\nf = {frequency/1e9:.1f} GHz, '
-                                f'N = {basis.num_basis} basis functions'))
+                         title=(rf'Induced Surface Current $|\mathbf{{J}}|$ on '
+                                rf'${width/wavelength:.1f}\lambda \times {height/wavelength:.1f}\lambda$ PEC Plate'
+                                '\n'
+                                rf'$f = {frequency/1e9:.1f}$ GHz, $N = {basis.num_basis}$'))
     ax.view_init(elev=45, azim=-60)
 
     output_file = os.path.join(images_dir, 'plate_scattering.png')

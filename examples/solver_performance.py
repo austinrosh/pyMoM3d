@@ -195,6 +195,8 @@ def main():
             import matplotlib
             matplotlib.use('Agg')
             import matplotlib.pyplot as plt
+            from pyMoM3d import configure_latex_style
+            configure_latex_style()
 
             Ns = [r['N'] for r in results]
             t_fills = [r['t_fill_s'] for r in results]
@@ -205,28 +207,28 @@ def main():
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
             # Left: timing vs N
-            ax1.loglog(Ns, t_fills, 'o-', label='Z fill')
+            ax1.loglog(Ns, t_fills, 'o-', label=r'$\mathbf{Z}$ fill')
             ax1.loglog(Ns, t_directs, 's-', label='Direct (LU)')
             ax1.loglog(Ns, t_gmres_list, '^-', label='GMRES')
             # Reference slopes
             N_ref = np.array(Ns, dtype=float)
             ax1.loglog(N_ref, t_fills[0] * (N_ref / N_ref[0])**2,
-                       '--', color='gray', alpha=0.5, label='~N^2')
+                       '--', color='gray', alpha=0.5, label=r'$\sim N^2$')
             ax1.loglog(N_ref, max(t_directs[0], 1e-4) * (N_ref / N_ref[0])**3,
-                       ':', color='gray', alpha=0.5, label='~N^3')
-            ax1.set_xlabel('N (basis functions)')
-            ax1.set_ylabel('Time (s)')
-            ax1.set_title('Solver Timing')
+                       ':', color='gray', alpha=0.5, label=r'$\sim N^3$')
+            ax1.set_xlabel(r'$N$ (basis functions)')
+            ax1.set_ylabel(r'Time (s)')
+            ax1.set_title(r'Solver Timing')
             ax1.legend()
             ax1.grid(True, which='both', alpha=0.3)
 
             # Right: memory vs N
-            ax2.loglog(Ns, Z_MBs, 'o-', label='Z matrix')
+            ax2.loglog(Ns, Z_MBs, 'o-', label=r'$\mathbf{Z}$ matrix')
             ax2.loglog(N_ref, Z_MBs[0] * (N_ref / N_ref[0])**2,
-                       '--', color='gray', alpha=0.5, label='~N^2')
-            ax2.set_xlabel('N (basis functions)')
-            ax2.set_ylabel('Memory (MB)')
-            ax2.set_title('Z Matrix Memory')
+                       '--', color='gray', alpha=0.5, label=r'$\sim N^2$')
+            ax2.set_xlabel(r'$N$ (basis functions)')
+            ax2.set_ylabel(r'Memory (MB)')
+            ax2.set_title(r'$\mathbf{Z}$ Matrix Memory')
             ax2.legend()
             ax2.grid(True, which='both', alpha=0.3)
 

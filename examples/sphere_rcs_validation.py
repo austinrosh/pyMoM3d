@@ -28,10 +28,14 @@ from pyMoM3d import (
     plot_mesh_3d,
     plot_surface_current,
     plot_surface_current_vectors,
+    configure_latex_style,
     eta0,
     c0,
 )
 from pyMoM3d.analysis.mie_series import mie_rcs_pec_sphere, mie_monostatic_rcs_pec_sphere
+
+# Configure LaTeX-style plotting
+configure_latex_style()
 
 
 def main():
@@ -147,10 +151,10 @@ def main():
     freq_GHz = frequencies / 1e9
     ax1.plot(freq_GHz, rcs_mono_mie_dBsm, 'k-', linewidth=2, label='Mie (exact)')
     ax1.plot(freq_GHz, rcs_mono_mom_dBsm, 'ro--', linewidth=1.5, markersize=5,
-             label=f'MoM (N={basis.num_basis})')
-    ax1.set_xlabel('Frequency (GHz)')
-    ax1.set_ylabel('Monostatic RCS (dBsm)')
-    ax1.set_title(f'Monostatic RCS, PEC sphere a={radius*100:.0f} cm')
+             label=rf'MoM ($N={basis.num_basis}$)')
+    ax1.set_xlabel(r'Frequency $f$ (GHz)')
+    ax1.set_ylabel(r'Monostatic RCS $\sigma$ (dBsm)')
+    ax1.set_title(rf'Monostatic RCS, PEC Sphere $a = {radius*100:.0f}$ cm')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
 
@@ -158,10 +162,10 @@ def main():
     theta_deg = np.degrees(theta_bi)
     ax2.plot(theta_deg, rcs_bi_mie_dBsm, 'k-', linewidth=2, label='Mie (exact)')
     ax2.plot(theta_deg, rcs_bi_mom_dBsm, 'r--', linewidth=1.5,
-             label=f'MoM (N={basis.num_basis})')
-    ax2.set_xlabel('Bistatic angle (deg)')
-    ax2.set_ylabel('Bistatic RCS (dBsm)')
-    ax2.set_title(f'Bistatic RCS at {f_bistatic/1e9:.1f} GHz (ka={ka_bi:.2f})')
+             label=rf'MoM ($N={basis.num_basis}$)')
+    ax2.set_xlabel(r'Bistatic angle $\theta$ (deg)')
+    ax2.set_ylabel(r'Bistatic RCS $\sigma$ (dBsm)')
+    ax2.set_title(rf'Bistatic RCS at $f = {f_bistatic/1e9:.1f}$ GHz ($ka = {ka_bi:.2f}$)')
     ax2.legend()
     ax2.grid(True, alpha=0.3)
     ax2.set_xlim([0, 180])
@@ -176,9 +180,10 @@ def main():
     ax_curr = fig2.add_subplot(111, projection='3d')
     plot_surface_current(I_bi, basis, mesh, ax=ax_curr, cmap='hot',
                          edge_color='gray', edge_width=0.3,
-                         title=(f'Induced surface current |J| on PEC sphere\n'
-                                f'f = {f_bistatic/1e9:.1f} GHz (ka={ka_bi:.2f}), '
-                                f'N = {basis.num_basis} basis functions'))
+                         title=(rf'Induced Surface Current $|\mathbf{{J}}|$ on PEC Sphere'
+                                '\n'
+                                rf'$f = {f_bistatic/1e9:.1f}$ GHz ($ka = {ka_bi:.2f}$), '
+                                rf'$N = {basis.num_basis}$'))
     ax_curr.view_init(elev=30, azim=-60)
     output_file = os.path.join(images_dir, 'sphere_surface_current.png')
     fig2.savefig(output_file, dpi=150, bbox_inches='tight')
@@ -193,10 +198,11 @@ def main():
         subsample_method='magnitude',
         cmap='plasma',
         scale=1.5,
-        title=(f'Surface current vectors on PEC sphere\n'
-               f'f = {f_bistatic/1e9:.1f} GHz, Real(J) at t=0'),
+        title=(rf'Surface Current Vectors $\mathrm{{Re}}(\mathbf{{J}})$ on PEC Sphere'
+               '\n'
+               rf'$f = {f_bistatic/1e9:.1f}$ GHz, $t = 0$'),
     )
-    plt.colorbar(sm, ax=ax_vec, label='|J| (A/m)', shrink=0.6)
+    plt.colorbar(sm, ax=ax_vec, label=r'$|\mathbf{J}|$ (A/m)', shrink=0.6)
     ax_vec.view_init(elev=30, azim=-60)
     output_file = os.path.join(images_dir, 'sphere_surface_current_vectors.png')
     fig3.savefig(output_file, dpi=150, bbox_inches='tight')
