@@ -7,10 +7,6 @@ This document explains the solver pipeline, the electromagnetic theory behind ea
 ```
 Geometry  -->  Mesh  -->  RWG Basis  -->  Z-matrix Fill  -->  Solve  -->  Post-process
 (primitives)  (triangles)  (basis fns)   (EFIE assembly)    (ZI=V)    (far-field, RCS)
-                                              |
-                                              v
-                                    Characteristic Mode Analysis
-                                    (modal decomposition of Z)
 ```
 
 Each stage is implemented in a dedicated module. Data flows left to right; the output of each stage is the input to the next.
@@ -271,60 +267,7 @@ Z_in = V_gap / I[feed_index]
 
 The `Simulation` class computes this automatically and stores it in `result.Z_input`.
 
-## Stage 6: Characteristic Mode Analysis (`analysis/cma.py`)
-
-### Background
-
-Characteristic Mode Analysis (CMA) decomposes the impedance matrix into intrinsic current modes that are independent of the excitation. This provides physical insight into how a structure naturally supports currents at different frequencies.
-
-### Theory
-
-The impedance matrix Z = R + jX is decomposed into the radiation resistance matrix R and reactance matrix X. The characteristic modes are eigenvectors of the generalized eigenvalue problem:
-
-```
-X · J_n = λ_n · R · J_n
-```
-
-where λ_n is the characteristic eigenvalue and J_n is the characteristic current.
-
-### Key Quantities
-
-- **Modal significance**: MS_n = 1 / sqrt(1 + λ_n²) — measures excitability (MS=1 at resonance)
-- **Characteristic angle**: α_n = 180° - arctan(λ_n) — phase relative to excitation
-
-### Code
-
-```python
-from pyMoM3d import compute_characteristic_modes, verify_orthogonality
-
-# After computing Z matrix
-cma = compute_characteristic_modes(Z, frequency=1e9, num_modes=5)
-
-# Access modes by significance rank
-J_mode1 = cma.get_mode(0)  # Most significant mode
-lambda_1 = cma.get_eigenvalue(0)
-ms_1 = cma.get_modal_significance(0)
-
-# Verify orthogonality
-is_orthog, error = verify_orthogonality(cma)
-
-# Use with Simulation class
-sim = Simulation(config, geometry=Sphere(radius=0.1), mesher='gmsh')
-cma = sim.compute_cma(frequency=1e9, num_modes=10)
-
-# Frequency sweep with mode tracking
-results, tracking = sim.cma_sweep(frequencies, num_modes=5, track_modes=True)
-```
-
-### Numerical Considerations
-
-- The R matrix can be ill-conditioned for electrically small structures (weak radiation)
-- Regularization is applied automatically: R_reg = R + ε·max(||R||, ||X||)·I
-- Mode tracking across frequency uses eigenvector correlation
-
----
-
-## Stage 7: Post-Processing (`fields/`, `analysis/`, `visualization/`)
+## Stage 6: Post-Processing (`fields/`, `analysis/`, `visualization/`)
 
 ### Far-Field Radiation
 

@@ -18,7 +18,6 @@ pyMoM3d solves the Electric Field Integral Equation (EFIE) for induced surface c
 - **Excitation sources**: Plane wave, single-edge delta-gap, and strip delta-gap (distributed across transverse feed edges)
 - **Solvers**: Direct (LU) and iterative (GMRES with diagonal preconditioner)
 - **Post-processing**: Far-field computation, bistatic/monostatic RCS, input impedance, S11, directivity, beamwidth
-- **Characteristic Mode Analysis (CMA)**: Modal decomposition of impedance matrix, eigenvalue spectra, modal significance, mode tracking across frequency
 - **Validation**: Built-in Mie series for PEC sphere RCS comparison
 - **Visualization**: 3D mesh rendering and surface current density heatmaps (linear and dB scale)
 - **Reporting**: Automatic simulation report generation with terminal progress and text-file summaries
@@ -78,34 +77,6 @@ result = sim.run()
 
 The trimesh mesher is still available (`mesher='trimesh'`, the default) for backward compatibility.
 
-### Characteristic Mode Analysis
-
-```python
-from pyMoM3d import (
-    RectangularPlate, GmshMesher, compute_rwg_connectivity,
-    fill_impedance_matrix, compute_characteristic_modes,
-    plot_surface_current, eta0, c0,
-)
-import numpy as np
-
-# Create mesh
-plate = RectangularPlate(width=0.15, height=0.10)
-mesh = GmshMesher(target_edge_length=0.015).mesh_from_geometry(plate)
-basis = compute_rwg_connectivity(mesh)
-
-# Compute impedance matrix and CMA
-k = 2 * np.pi * 1e9 / c0
-Z = fill_impedance_matrix(basis, mesh, k, eta0)
-cma = compute_characteristic_modes(Z, frequency=1e9)
-
-# Access most significant mode
-J_mode1 = cma.get_mode(0)
-print(f"Mode 1: λ={cma.get_eigenvalue(0):.2f}, MS={cma.get_modal_significance(0):.3f}")
-
-# Visualize modal current
-plot_surface_current(J_mode1, basis, mesh, title='Mode 1')
-```
-
 ## Examples
 
 | Example | Description |
@@ -116,8 +87,6 @@ plot_surface_current(J_mode1, basis, mesh, title='Mode 1')
 | `simulation_driver_demo.py` | High-level `Simulation` API with frequency sweep and save/load |
 | `solver_performance.py` | Benchmarks Z-fill and solve time vs mesh size |
 | `stl_rcs_example.py` | Load an STL/OBJ file via file dialog, choose mesh resolution (coarse/medium/fine), assess quality, remesh if needed, compute bistatic RCS and surface current (linear + dB) |
-| `cma_plate_example.py` | Characteristic Mode Analysis on a rectangular plate: modal currents, eigenvalue spectrum, significance vs frequency |
-| `cma_sphere_validation.py` | CMA on PEC sphere: validates against theoretical Mie mode resonances |
 
 ```bash
 PYTHONPATH=src python examples/sphere_rcs_validation.py

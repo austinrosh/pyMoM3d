@@ -25,8 +25,6 @@ python examples/plate_scattering.py
 python examples/simulation_driver_demo.py
 python examples/solver_performance.py
 python examples/stl_rcs_example.py    # requires tkinter
-python examples/cma_plate_example.py
-python examples/cma_sphere_validation.py
 ```
 
 ## Architecture
@@ -61,11 +59,9 @@ The library follows a pipeline: **Geometry → Mesh → RWG Basis → Z-Fill →
 
 **`fields/rcs.py`** - `compute_rcs()` and `compute_monostatic_rcs()` for RCS in dBsm
 
-**`simulation.py`** - `Simulation` class orchestrating the full pipeline; `load_stl()` for STL/OBJ loading; `compute_cma()` and `cma_sweep()` for Characteristic Mode Analysis
+**`simulation.py`** - `Simulation` class orchestrating the full pipeline; `load_stl()` for STL/OBJ loading
 
-**`analysis/cma.py`** - `compute_characteristic_modes()` for CMA eigenvalue decomposition, `CMAResult` dataclass, modal significance/angle computation, `track_modes_across_frequency()` for mode tracking, `verify_orthogonality()` for validation
-
-**`visualization/mesh_plot.py`** - `plot_mesh_3d()` for 3D surface rendering, `plot_mesh()` for 2D, `plot_surface_current()` for current density heatmaps (works with both driven currents and CMA modal currents)
+**`visualization/mesh_plot.py`** - `plot_mesh_3d()` for 3D surface rendering, `plot_mesh()` for 2D, `plot_surface_current()` for current density heatmaps
 
 **`visualization/plot_style.py`** - `configure_latex_style()` for LaTeX rendering configuration, label formatters (`format_frequency_label()`, `format_rcs_label()`, etc.), and title helpers for consistent scientific notation
 
@@ -104,37 +100,6 @@ mesh = PythonMesher().mesh_from_geometry(trimesh_obj)
 mesh.validate()
 compute_rwg_connectivity(mesh)
 plot_mesh_3d(mesh, show_edges=True)
-```
-
-### Characteristic Mode Analysis Workflow
-
-```python
-from pyMoM3d import (
-    RectangularPlate, GmshMesher, compute_rwg_connectivity,
-    fill_impedance_matrix, compute_characteristic_modes,
-    plot_surface_current, eta0, c0,
-)
-import numpy as np
-
-# 1. Create geometry and mesh
-plate = RectangularPlate(width=0.15, height=0.10)
-mesh = GmshMesher(target_edge_length=0.015).mesh_from_geometry(plate)
-basis = compute_rwg_connectivity(mesh)
-
-# 2. Compute impedance matrix
-k = 2 * np.pi * 1e9 / c0
-Z = fill_impedance_matrix(basis, mesh, k, eta0)
-
-# 3. Perform CMA
-cma = compute_characteristic_modes(Z, frequency=1e9, num_modes=5)
-
-# 4. Access modes by significance rank
-J_mode1 = cma.get_mode(0)  # Most significant mode
-lambda_1 = cma.get_eigenvalue(0)
-ms_1 = cma.get_modal_significance(0)
-
-# 5. Visualize modal current
-plot_surface_current(J_mode1, basis, mesh, title=f'Mode 1: λ={lambda_1:.2f}')
 ```
 
 ## Code Conventions
@@ -193,7 +158,6 @@ from pyMoM3d import (
     format_rcs_label,          # → 'RCS $\sigma$ (dBsm)'
     format_impedance_label,    # → '$R_{\mathrm{in}}$ ($\Omega$)'
     format_current_label,      # → '$|\mathbf{J}|$ (A/m)'
-    format_eigenvalue_label,   # → 'Eigenvalue $\lambda_n$'
     format_angle_label,        # → '$\theta$ (deg)'
 )
 
@@ -242,4 +206,4 @@ ax.set_ylabel(r'$R_{\mathrm{in}}$')
 
 ## Project Status
 
-**Implemented**: Geometry primitives, mesh data structures, RWG connectivity, Gmsh-based meshing (recommended) with feed-line support, trimesh-based meshing (legacy fallback), STL/OBJ file import with quality assessment and configurable resolution presets (coarse/medium/fine), uniform mesh refinement for STL/OBJ remeshing, OBJ multi-material Scene concatenation, EFIE impedance matrix with singularity extraction, excitation sources (plane wave, delta-gap, strip delta-gap), direct and iterative solvers with solver recommendation for large meshes, far-field/RCS computation, Mie series validation, surface current visualization (linear and dB scale) with plane wave info on plots, high-level simulation driver with reporting, interactive STL/OBJ example, frequency finder utility, **Characteristic Mode Analysis (CMA)** with modal significance, characteristic angles, frequency sweeps, and mode tracking
+**Implemented**: Geometry primitives, mesh data structures, RWG connectivity, Gmsh-based meshing (recommended) with feed-line support, trimesh-based meshing (legacy fallback), STL/OBJ file import with quality assessment and configurable resolution presets (coarse/medium/fine), uniform mesh refinement for STL/OBJ remeshing, OBJ multi-material Scene concatenation, EFIE impedance matrix with singularity extraction, excitation sources (plane wave, delta-gap, strip delta-gap), direct and iterative solvers with solver recommendation for large meshes, far-field/RCS computation, Mie series validation, surface current visualization (linear and dB scale) with plane wave info on plots, high-level simulation driver with reporting, interactive STL/OBJ example, frequency finder utility

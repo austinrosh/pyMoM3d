@@ -18,13 +18,10 @@ from .plot_style import (
     format_rcs_label,
     format_impedance_label,
     format_current_label,
-    format_eigenvalue_label,
-    format_modal_significance_label,
     format_directivity_label,
     format_coordinate_label,
     format_rcs_title,
     format_current_title,
-    format_cma_title,
     format_resonance_annotation,
     format_plane_wave_annotation,
 )
@@ -47,14 +44,11 @@ __all__ = [
     'format_rcs_label',
     'format_impedance_label',
     'format_current_label',
-    'format_eigenvalue_label',
-    'format_modal_significance_label',
     'format_directivity_label',
     'format_coordinate_label',
     # Title formatters
     'format_rcs_title',
     'format_current_title',
-    'format_cma_title',
     # Annotation helpers
     'format_resonance_annotation',
     'format_plane_wave_annotation',

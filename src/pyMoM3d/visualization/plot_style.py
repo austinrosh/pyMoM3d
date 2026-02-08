@@ -334,16 +334,6 @@ def format_current_label(log_scale: bool = False) -> str:
     return r'$|\mathbf{J}|$ (A/m)'
 
 
-def format_eigenvalue_label() -> str:
-    """Return LaTeX-formatted eigenvalue axis label for CMA."""
-    return r'Eigenvalue $\lambda_n$'
-
-
-def format_modal_significance_label() -> str:
-    """Return LaTeX-formatted modal significance axis label."""
-    return r'Modal Significance MS$_n$'
-
-
 def format_directivity_label(unit: str = 'dBi') -> str:
     """Return LaTeX-formatted directivity axis label.
 
@@ -445,30 +435,6 @@ def format_current_title(
         parts.append(rf'$N = {num_basis}$')
 
     return '\n'.join([parts[0], ', '.join(parts[1:])] if len(parts) > 1 else parts)
-
-
-def format_cma_title(
-    mode_number: int,
-    eigenvalue: float,
-    modal_significance: float,
-) -> str:
-    """Return LaTeX-formatted title for CMA modal current plots.
-
-    Parameters
-    ----------
-    mode_number : int
-        Mode number (1-indexed for display).
-    eigenvalue : float
-        Characteristic eigenvalue.
-    modal_significance : float
-        Modal significance (0 to 1).
-
-    Returns
-    -------
-    title : str
-        LaTeX-formatted title string.
-    """
-    return rf'Mode {mode_number}: $\lambda = {eigenvalue:.2f}$, MS $= {modal_significance:.3f}$'
 
 
 # =============================================================================
