@@ -1,53 +1,54 @@
+# -------------------------
 # Python
+# -------------------------
 __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
+*.so
+*.pyd
+*.dylib
+
 dist/
 build/
-*.so
 
+# -------------------------
 # Virtual environments
+# -------------------------
 .venv/
 venv/
 env/
 
+# -------------------------
 # IDE / editor
-.cursorrules
-CLAUDE.md
+# -------------------------
 .idea/
 .vscode/
-.gitignore
 *.swp
 *.swo
 *~
 
-# Claude / AI tooling
-.claude/
-
-# Generated output (local only)
+# -------------------------
+# Generated output
+# -------------------------
 images/
 results/
+models/
 
+# -------------------------
 # OS files
+# -------------------------
 .DS_Store
 Thumbs.db
 
-# Test / pytest
+# -------------------------
+# Testing
+# -------------------------
 .pytest_cache/
 htmlcov/
 .coverage
-models/
 
+# -------------------------
 # Notebooks
+# -------------------------
 .ipynb_checkpoints/
-
-# Local docs not for public repo
-docs/roadmap.md
-docs/theory_of_operation.md
-/plans
-docs/api-reference.md
-CONVENTIONS.md
-
-# Personal utility scripts
-examples/freq_finder.py

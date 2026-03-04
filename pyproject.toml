@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyMoM3d"
+version = "0.2.0"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "trimesh",
+    "gmsh",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
