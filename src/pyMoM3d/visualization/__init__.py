@@ -7,6 +7,7 @@ from .mesh_plot import (
     compute_triangle_current_density,
     plot_surface_current_vectors,
     compute_triangle_current_vectors,
+    plot_array_layout,
 )
 
 from .plot_style import (
@@ -34,6 +35,7 @@ __all__ = [
     'compute_triangle_current_density',
     'plot_surface_current_vectors',
     'compute_triangle_current_vectors',
+    'plot_array_layout',
     # Plot style configuration
     'configure_latex_style',
     'restore_default_style',

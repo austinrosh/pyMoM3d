@@ -10,23 +10,24 @@ pyMoM3d solves the Electric Field Integral Equation (EFIE) for induced surface c
 
 ## Features
 
-- **Geometry primitives**: Rectangular plate, sphere, cylinder, cube, pyramid
+- **Geometry primitives**: Rectangular plate, sphere, cylinder, cube, pyramid for canonical scattering analysis and solver benchmarking
 - **STL/OBJ import**: Load external mesh files (`.stl`, `.obj`) with automatic quality assessment and optional remeshing
-- **Automatic meshing**: Triangular surface meshes via [Gmsh](https://gmsh.info/) (recommended) or [trimesh](https://trimesh.org/) with configurable refinement; includes `mesh_plate_with_feed()` for conformal feed-line meshing
+- **Automatic meshing**: Triangular surface meshes via [Gmsh](https://gmsh.info/) with configurable refinement
 - **RWG basis functions**: Automatic detection of interior edges and basis function assignment
 - **EFIE impedance matrix**: Full dense Z-matrix assembly with singularity extraction (Wilton 1984, Graglia 1993)
-- **Excitation sources**: Plane wave, single-edge delta-gap, and strip delta-gap (distributed across transverse feed edges)
+- **Excitation sources**: Plane wave, single-edge delta-gap, strip delta-gap, and multi-port excitation for arrays
 - **Solvers**: Direct (LU) and iterative (GMRES with diagonal preconditioner)
 - **Post-processing**: Far-field computation, bistatic/monostatic RCS, input impedance, S11, directivity, beamwidth
 - **Validation**: Built-in Mie series for PEC sphere RCS comparison
-- **Visualization**: 3D mesh rendering and surface current density heatmaps (linear and dB scale)
-- **Reporting**: Automatic simulation report generation with terminal progress and text-file summaries
+- **Visualization**: 3D mesh rendering and surface current density heatmaps 
+- **Reporting**: Automatic generates simulation report metadata with terminal progress and text-file summaries
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
-PYTHONPATH=src python examples/sphere_rcs_validation.py
+pip install -e .
+python examples/sphere_rcs_validation.py
 ```
 
 ```python
@@ -86,14 +87,18 @@ The trimesh mesher is still available (`mesher='trimesh'`, the default) for back
 | `plate_scattering.py` | Rectangular plate plane-wave scattering vs Physical Optics |
 | `simulation_driver_demo.py` | High-level `Simulation` API with frequency sweep and save/load |
 | `solver_performance.py` | Benchmarks Z-fill and solve time vs mesh size |
+| `friis_validation.py` | Two-antenna Friis transmission equation validation: distance and polarization sweeps |
+| `dipole_array.py` | 8-element linear dipole array with beam steering, mutual coupling, and pattern validation |
 | `stl_rcs_example.py` | Load an STL/OBJ file via file dialog, choose mesh resolution (coarse/medium/fine), assess quality, remesh if needed, compute bistatic RCS and surface current (linear + dB) |
 
 ```bash
-PYTHONPATH=src python examples/sphere_rcs_validation.py
-PYTHONPATH=src python examples/dipole_impedance_sweep.py
-PYTHONPATH=src python examples/plate_scattering.py
-PYTHONPATH=src python examples/simulation_driver_demo.py
-PYTHONPATH=src python examples/stl_rcs_example.py
+python examples/sphere_rcs_validation.py
+python examples/dipole_impedance_sweep.py
+python examples/plate_scattering.py
+python examples/simulation_driver_demo.py
+python examples/friis_validation.py
+python examples/dipole_array.py
+python examples/stl_rcs_example.py
 ```
 
 > **Note:** `stl_rcs_example.py` uses `tkinter` for the file selection dialog. On macOS, the default Homebrew Python may not include tkinter. To install it:
@@ -109,6 +114,7 @@ src/pyMoM3d/
     geometry/       Parametric geometry primitives
     mesh/           Mesh data structures, meshing, RWG basis
     greens/         Green's function, quadrature, singularity extraction
+    arrays/         Antenna array abstractions (LinearDipoleArray)
     mom/            Impedance matrix, excitation, solvers
     fields/         Far-field computation, RCS
     analysis/       Mie series, convergence studies, impedance analysis
@@ -123,7 +129,7 @@ docs/               Documentation
 ## Testing
 
 ```bash
-PYTHONPATH=src pytest tests/ -v
+pytest tests/ -v
 ```
 
 ## Conventions
@@ -133,13 +139,11 @@ PYTHONPATH=src pytest tests/ -v
 - **Green's function**: $\frac{\exp(-jkR)}{(4*\pi*R)}$
 - **Numerical types**: `float64` for coordinates, `int32` for indices, `complex128` for fields
 
-See [CONVENTIONS.md](CONVENTIONS.md) for full details.
 
 ## Documentation
 
 - [Getting Started](docs/getting-started.md) - Installation, quick start, running tests and examples
 - [Architecture Guide](docs/architecture.md) - Solver pipeline, EM theory, singularity extraction
-- [API Reference](docs/api-reference.md) - Complete module, class, and function reference
 - [Examples Guide](docs/examples-guide.md) - Detailed walkthrough of each example with code patterns
 
 ## References

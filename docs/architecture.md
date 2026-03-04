@@ -114,15 +114,6 @@ RWG (Rao-Wilton-Glisson) basis functions are the standard choice for MoM on tria
 
 For basis function `n` with shared edge of length `l_n`:
 
-```
-         T+ (area A+)              T- (area A-)
-        /    \                    /    \
-       / rho+ \                  / rho- \
-      /   ->   \   shared edge  /   <-   \
-     /          \--------------/          \
-    v_free+      edge v_a--v_b      v_free-
-```
-
 - **T+**: triangle where current flows *away* from the free vertex
   - `f_n(r) = (l_n / 2A+) * (r - r_free+)`
   - Divergence: `+l_n / A+`

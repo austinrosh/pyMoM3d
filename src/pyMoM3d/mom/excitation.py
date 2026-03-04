@@ -248,6 +248,167 @@ class StripDeltaGapExcitation(Excitation):
         return self.voltage / I_terminal
 
 
+def find_feed_edges_near_center(
+    mesh: Mesh,
+    rwg_basis: RWGBasis,
+    element_center: np.ndarray,
+    dipole_axis: np.ndarray,
+    tol: float = None,
+    perp_tol: float = None,
+) -> list:
+    """Find feed edges near an element center for array configurations.
+
+    Generalized feed edge finder that works for any dipole orientation.
+    Identifies basis functions whose shared edge:
+    1. Has midpoint near element_center along the dipole axis (at the feed).
+    2. Has midpoint near element_center in the perpendicular directions
+       (belongs to this element, not a neighbor).
+    3. Is more transverse than longitudinal relative to dipole_axis.
+
+    Parameters
+    ----------
+    mesh : Mesh
+    rwg_basis : RWGBasis
+    element_center : ndarray, shape (3,)
+        3D center position of the antenna element.
+    dipole_axis : ndarray, shape (3,)
+        Unit vector along the dipole arm direction.
+    tol : float, optional
+        Tolerance along dipole axis for feed location.
+        Defaults to half the minimum edge length.
+    perp_tol : float, optional
+        Tolerance perpendicular to dipole axis for element membership.
+        Defaults to 5 * tol.
+
+    Returns
+    -------
+    indices : list of int
+        Basis function indices for feed edges at this element.
+    """
+    element_center = np.asarray(element_center, dtype=np.float64)
+    dipole_axis = np.asarray(dipole_axis, dtype=np.float64)
+    dipole_axis = dipole_axis / np.linalg.norm(dipole_axis)
+
+    if tol is None:
+        lengths = []
+        for n in range(min(rwg_basis.num_basis, 50)):
+            e = mesh.edges[rwg_basis.edge_index[n]]
+            lengths.append(np.linalg.norm(
+                mesh.vertices[e[1]] - mesh.vertices[e[0]]))
+        tol = 0.5 * min(lengths) if lengths else 1e-6
+
+    if perp_tol is None:
+        perp_tol = 5.0 * tol
+
+    indices = []
+    for n in range(rwg_basis.num_basis):
+        e = mesh.edges[rwg_basis.edge_index[n]]
+        va = mesh.vertices[e[0]]
+        vb = mesh.vertices[e[1]]
+        mid = 0.5 * (va + vb)
+
+        # Vector from element center to edge midpoint
+        r = mid - element_center
+
+        # Check projection along dipole axis (edge at the feed location)
+        proj_along = abs(np.dot(r, dipole_axis))
+        if proj_along > tol:
+            continue
+
+        # Check perpendicular distance (edge belongs to this element)
+        r_perp = r - np.dot(r, dipole_axis) * dipole_axis
+        dist_perp = np.linalg.norm(r_perp)
+        if dist_perp > perp_tol:
+            continue
+
+        # Check edge direction: more transverse than longitudinal
+        edge_dir = vb - va
+        edge_len = np.linalg.norm(edge_dir)
+        if edge_len < 1e-30:
+            continue
+        edge_dir /= edge_len
+
+        if abs(np.dot(edge_dir, dipole_axis)) < np.linalg.norm(
+            np.cross(edge_dir, dipole_axis)
+        ):
+            indices.append(n)
+
+    return indices
+
+
+class MultiPortExcitation(Excitation):
+    """Multi-port excitation for antenna arrays.
+
+    Each port is a list of feed basis indices driven with an independent
+    complex voltage. This enables simultaneous excitation of multiple
+    antenna elements with different amplitudes and phases.
+
+    Parameters
+    ----------
+    port_feed_indices : list of list of int
+        Feed basis indices for each port.
+    voltages : ndarray, shape (N_ports,), complex128
+        Complex voltage for each port.
+    """
+
+    def __init__(self, port_feed_indices: list, voltages: np.ndarray):
+        self.port_feed_indices = [list(p) for p in port_feed_indices]
+        self.voltages = np.asarray(voltages, dtype=np.complex128)
+        if len(self.port_feed_indices) != len(self.voltages):
+            raise ValueError(
+                f"Number of ports ({len(self.port_feed_indices)}) must match "
+                f"number of voltages ({len(self.voltages)})"
+            )
+
+    def compute_voltage_vector(
+        self, rwg_basis: RWGBasis, mesh: Mesh, k: float
+    ) -> np.ndarray:
+        """Compute voltage vector with multi-port excitation.
+
+        For each port p, sets V[idx] = voltages[p] * edge_length[idx]
+        for all feed indices in port p.
+        """
+        N = rwg_basis.num_basis
+        V = np.zeros(N, dtype=np.complex128)
+        for p, indices in enumerate(self.port_feed_indices):
+            for idx in indices:
+                if 0 <= idx < N:
+                    V[idx] = self.voltages[p] * rwg_basis.edge_length[idx]
+        return V
+
+    def compute_port_impedance(
+        self,
+        I_coeffs: np.ndarray,
+        rwg_basis: RWGBasis,
+        mesh: Mesh,
+        port: int,
+    ) -> complex:
+        """Compute active (scan) impedance at a specific port.
+
+        Z_in = voltages[port] / I_terminal, where
+        I_terminal = sum(I_n * l_n) over the port's feed edges.
+
+        Parameters
+        ----------
+        I_coeffs : ndarray, shape (N,), complex128
+        rwg_basis : RWGBasis
+        mesh : Mesh
+        port : int
+            Port index.
+
+        Returns
+        -------
+        Z_in : complex
+        """
+        I_terminal = 0.0 + 0.0j
+        for idx in self.port_feed_indices[port]:
+            I_terminal += I_coeffs[idx] * rwg_basis.edge_length[idx]
+
+        if abs(I_terminal) < 1e-30:
+            return np.inf + 0j
+        return self.voltages[port] / I_terminal
+
+
 def find_nearest_edge(mesh: Mesh, rwg_basis: RWGBasis, point: np.ndarray) -> int:
     """Find the basis function whose shared edge midpoint is nearest to a point.
 

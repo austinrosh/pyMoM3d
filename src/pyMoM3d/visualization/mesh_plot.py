@@ -622,3 +622,165 @@ def plot_surface_current_vectors(
     ax.set_title(title)
 
     return ax, sm
+
+
+def plot_array_layout(
+    element_positions: np.ndarray,
+    dipole_length: float,
+    strip_width: float,
+    dipole_axis: np.ndarray,
+    array_axis: np.ndarray,
+    ax=None,
+    element_labels: bool = True,
+    excitation_weights: np.ndarray = None,
+    element_colors: np.ndarray = None,
+    cmap: str = 'viridis',
+    title: str = None,
+) -> plt.Axes:
+    """Draw a 2D layout of an antenna array.
+
+    Projects each element as a thin rectangle in the plane defined by
+    array_axis and dipole_axis.
+
+    Parameters
+    ----------
+    element_positions : ndarray, shape (N, 3)
+        3D center positions of each element.
+    dipole_length : float
+        Length of each dipole element.
+    strip_width : float
+        Width of the strip dipole.
+    dipole_axis : ndarray, shape (3,)
+        Unit vector along dipole arm direction.
+    array_axis : ndarray, shape (3,)
+        Unit vector along array direction.
+    ax : matplotlib.axes.Axes, optional
+        Existing 2D axes. If None, creates new figure and axes.
+    element_labels : bool, default True
+        Whether to label each element with its index.
+    excitation_weights : ndarray, shape (N,), complex, optional
+        If provided, annotate amplitude and phase per element.
+    element_colors : ndarray, shape (N,), optional
+        Scalar values for coloring elements.
+    cmap : str, default 'viridis'
+        Colormap for element_colors.
+    title : str, optional
+        Plot title.
+
+    Returns
+    -------
+    ax : matplotlib.axes.Axes
+    """
+    from matplotlib.patches import Rectangle
+    from matplotlib.collections import PatchCollection
+
+    element_positions = np.asarray(element_positions)
+    dipole_axis = np.asarray(dipole_axis, dtype=np.float64)
+    array_axis = np.asarray(array_axis, dtype=np.float64)
+    dipole_axis = dipole_axis / np.linalg.norm(dipole_axis)
+    array_axis = array_axis / np.linalg.norm(array_axis)
+
+    # Determine which 2D axes to use (projection)
+    axis_labels = {0: r'$x$ (m)', 1: r'$y$ (m)', 2: r'$z$ (m)'}
+
+    # Find the two non-zero axis indices
+    combined = np.abs(array_axis) + np.abs(dipole_axis)
+    active_dims = np.where(combined > 0.5)[0]
+    if len(active_dims) < 2:
+        active_dims = np.array([0, 2])  # fallback
+    idx_h, idx_v = active_dims[0], active_dims[1]
+
+    # Determine which axis is the array axis and which is the dipole axis
+    # in the 2D projection
+    if abs(array_axis[idx_h]) > abs(dipole_axis[idx_h]):
+        # idx_h is the array direction, idx_v is the dipole direction
+        pass
+    else:
+        idx_h, idx_v = idx_v, idx_h
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(12, 4))
+
+    n_elements = len(element_positions)
+
+    if element_colors is not None:
+        colormap = plt.get_cmap(cmap)
+        norm = mcolors.Normalize(
+            vmin=np.min(element_colors), vmax=np.max(element_colors))
+
+    patches = []
+    for n in range(n_elements):
+        pos = element_positions[n]
+        # Rectangle center in 2D
+        cx, cy = pos[idx_h], pos[idx_v]
+
+        # Rectangle dimensions: width along array_axis, height along dipole_axis
+        rect_w = strip_width  # transverse to dipole
+        rect_h = dipole_length  # along dipole
+
+        rect = Rectangle(
+            (cx - rect_w / 2, cy - rect_h / 2),
+            rect_w, rect_h,
+        )
+        patches.append(rect)
+
+        # Feed point dot
+        ax.plot(cx, cy, 'ko', markersize=3, zorder=5)
+
+        # Element label
+        if element_labels:
+            ax.text(cx, cy + rect_h / 2 + dipole_length * 0.08,
+                    str(n), ha='center', va='bottom', fontsize=8)
+
+        # Excitation annotation
+        if excitation_weights is not None:
+            w = excitation_weights[n]
+            amp = np.abs(w)
+            phase_deg = np.degrees(np.angle(w))
+            ax.text(cx, cy - rect_h / 2 - dipole_length * 0.08,
+                    rf'${amp:.2f}\angle{phase_deg:.0f}^\circ$',
+                    ha='center', va='top', fontsize=7)
+
+    if element_colors is not None:
+        colors = [colormap(norm(element_colors[n])) for n in range(n_elements)]
+    else:
+        colors = ['steelblue'] * n_elements
+
+    collection = PatchCollection(patches, match_original=False)
+    collection.set_facecolor(colors)
+    collection.set_edgecolor('black')
+    collection.set_linewidth(0.5)
+    ax.add_collection(collection)
+
+    # Spacing annotation arrow (between first two elements if > 1)
+    if n_elements > 1:
+        p0 = element_positions[0]
+        p1 = element_positions[1]
+        x0, y0 = p0[idx_h], p0[idx_v] - dipole_length / 2 - dipole_length * 0.2
+        x1, y1 = p1[idx_h], y0
+        ax.annotate('', xy=(x1, y1), xytext=(x0, y0),
+                     arrowprops=dict(arrowstyle='<->', color='red', lw=1.5))
+        spacing = np.linalg.norm(p1 - p0)
+        ax.text((x0 + x1) / 2, y0 - dipole_length * 0.08,
+                rf'$d = {spacing*1e3:.1f}$ mm',
+                ha='center', va='top', fontsize=9, color='red')
+
+    # Axis labels
+    ax.set_xlabel(axis_labels[idx_h])
+    ax.set_ylabel(axis_labels[idx_v])
+
+    if title is not None:
+        ax.set_title(title)
+
+    ax.set_aspect('equal')
+    ax.grid(True, alpha=0.3)
+
+    # Auto-scale with margins
+    margin = max(dipole_length, strip_width) * 0.5
+    all_h = element_positions[:, idx_h]
+    all_v = element_positions[:, idx_v]
+    ax.set_xlim(all_h.min() - margin, all_h.max() + margin)
+    ax.set_ylim(all_v.min() - dipole_length - margin,
+                all_v.max() + dipole_length + margin)
+
+    return ax

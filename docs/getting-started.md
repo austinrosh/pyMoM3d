@@ -12,8 +12,6 @@ Given a conducting surface geometry and an excitation (plane wave or delta-gap f
 
 ## Installation
 
-There is no `pyproject.toml` or `setup.py` yet. Run everything from the repository root with the `src/` directory on the Python path:
-
 ```bash
 # Clone and enter the repo
 cd pyMoM3d
@@ -25,8 +23,11 @@ source .venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
+# Install pyMoM3d in editable mode (required once after cloning)
+pip install -e .
+
 # Verify the import works
-PYTHONPATH=src python -c "import pyMoM3d; print(pyMoM3d.__version__)"
+python -c "import pyMoM3d; print(pyMoM3d.__version__)"
 # Should print: 0.2.0
 ```
 
@@ -39,12 +40,6 @@ The runtime dependencies are listed in `requirements.txt`:
 
 **Optional:**
 - **tkinter** — required for the file-selection dialog in `stl_rcs_example.py`. On macOS with Homebrew Python: `brew install python-tk@3.13` (match your Python version). On Ubuntu/Debian: `sudo apt install python3-tk`. On Windows, tkinter is included with the standard Python installer.
-
-All commands in this documentation assume you run them from the repository root with `PYTHONPATH=src` set, or equivalently:
-
-```bash
-export PYTHONPATH=src
-```
 
 ## Quick Start: Scatter a Plane Wave off a Sphere
 
@@ -158,16 +153,16 @@ for r in results:
 
 ```bash
 # All tests
-PYTHONPATH=src pytest tests/
+pytest tests/
 
 # Specific test file
-PYTHONPATH=src pytest tests/test_impedance.py
+pytest tests/test_impedance.py
 
 # Specific test class or method
-PYTHONPATH=src pytest tests/test_greens.py::TestSingularity::test_green_self_term_finite
+pytest tests/test_greens.py::TestSingularity::test_green_self_term_finite
 
 # Verbose output
-PYTHONPATH=src pytest tests/ -v
+pytest tests/ -v
 ```
 
 The test suite covers geometry, meshing, RWG basis computation, Green's function quadrature, singularity extraction, impedance matrix assembly, solvers, far-field computation, and the simulation driver.
@@ -178,22 +173,22 @@ Each example in `examples/` is a standalone script:
 
 ```bash
 # PEC sphere bistatic RCS vs Mie series (primary validation)
-PYTHONPATH=src python examples/sphere_rcs_validation.py
+python examples/sphere_rcs_validation.py
 
 # Strip dipole input impedance vs frequency
-PYTHONPATH=src python examples/dipole_impedance_sweep.py
+python examples/dipole_impedance_sweep.py
 
 # Rectangular plate plane-wave scattering
-PYTHONPATH=src python examples/plate_scattering.py
+python examples/plate_scattering.py
 
 # High-level simulation driver demo
-PYTHONPATH=src python examples/simulation_driver_demo.py
+python examples/simulation_driver_demo.py
 
 # Solver performance benchmark
-PYTHONPATH=src python examples/solver_performance.py
+python examples/solver_performance.py
 
 # Interactive STL/OBJ → RCS + surface current (requires tkinter)
-PYTHONPATH=src python examples/stl_rcs_example.py
+python examples/stl_rcs_example.py
 ```
 
 Each example prints diagnostic output to the terminal and saves plots to the `images/` directory.

@@ -3,7 +3,7 @@
 Detailed walkthrough of each example script. All examples are standalone and can be run from the repository root:
 
 ```bash
-PYTHONPATH=src python examples/<example_name>.py
+python examples/<example_name>.py
 ```
 
 Each example prints progress to the terminal and saves plots to `images/`.
@@ -210,17 +210,148 @@ loaded = SimulationResult.load("my_result.npz")
 
 ---
 
-## 5. Solver Performance Benchmark (`solver_performance.py`)
+## 5. Friis Transmission Equation Validation (`friis_validation.py`)
 
-**Purpose:** Benchmarks impedance matrix assembly and solver execution time across different mesh sizes to characterize scaling behavior.
+**Purpose:** Validates the solver's ability to predict received power between two half-wave dipole antennas in free space. Compares MoM-simulated received power against the analytical Friis transmission equation, sweeping both separation distance and polarization alignment.
 
-```bash
-PYTHONPATH=src python examples/solver_performance.py
+**What it does:**
+
+1. Characterizes an isolated half-wave dipole at 5 GHz: input impedance, broadside gain, radiation pattern
+2. Distance sweep: places co-polarized TX and RX dipoles at 5-15 lambda separation (8 points), compares received power ratio against Friis prediction
+3. Polarization sweep: at fixed R = 10 lambda, rotates RX dipole from 0 to 90 degrees, compares against Friis with cos^2(psi) polarization mismatch
+4. Prints pass/fail summary against validation thresholds
+
+**Key output:**
+- Self-impedance Z_in, broadside gain G_bs (expected ~2.15 dBi)
+- P_rx/P_tx vs distance and polarization tables with error
+- Pass/fail on distance (<1.0 dB), polarization (<1.5 dB), gain (within 0.5 dB of 2.15 dBi), cross-pol isolation (>60 dB)
+
+**Generated plots** (`images/`):
+
+| File | Content |
+|---|---|
+| `friis_dipole_characterization.png` | Radiation pattern (E/H-plane), antenna parameters, E-plane polar |
+| `friis_distance_sweep.png` | P_rx/P_tx vs R/lambda (theory + MoM) and error |
+| `friis_polarization_sweep.png` | P_rx/P_tx vs psi (theory + MoM) and polarization loss factor |
+| `friis_surface_current.png` | 3D surface current on TX+RX pair at R = 10 lambda |
+
+**Relevant code pattern — two-antenna simulation with mesh combining:**
+
+```python
+from pyMoM3d.mesh.mesh_data import Mesh
+
+# Create two separate dipole meshes
+mesh_tx = mesher.mesh_plate_with_feed(width=L, height=w, feed_x=0.0, center=(0,0,0))
+mesh_rx = mesher.mesh_plate_with_feed(width=L, height=w, feed_x=0.0, center=(0,0,R))
+
+# Combine into single mesh
+n_verts_tx = len(mesh_tx.vertices)
+combined_verts = np.vstack([mesh_tx.vertices, mesh_rx.vertices])
+combined_tris = np.vstack([mesh_tx.triangles, mesh_rx.triangles + n_verts_tx])
+combined = Mesh(combined_verts, combined_tris)
+
+# Compute RWG on combined mesh, find feeds by z-coordinate
+basis = compute_rwg_connectivity(combined)
+feed_tx = find_feed_edges_at_z(combined, basis, feed_x=0.0, z_center=0.0)
+feed_rx = find_feed_edges_at_z(combined, basis, feed_x=0.0, z_center=R)
+
+# Excite TX only, solve
+exc = StripDeltaGapExcitation(feed_basis_indices=feed_tx, voltage=1.0)
+V = exc.compute_voltage_vector(basis, combined, k)
+Z = fill_impedance_matrix(basis, combined, k, eta0)
+I = solve_direct(Z, V)
+
+# Extract received power via two-port analysis
+I_rx_sc = compute_terminal_current(I, basis, feed_rx)
+V_oc = -Z_self * I_rx_sc
+P_rx = |V_oc|^2 / (8 * Re(Z_self))
+```
+
+**Tips:**
+- The script uses `find_feed_edges_at_z()` to disambiguate TX and RX feed edges that both have feed_x=0
+- For rotated dipoles, `find_rotated_feed_edges()` checks edge direction against the rotated transverse axis
+- Runtime is 2-5 minutes depending on hardware (17 MoM solves with ~100-200 basis functions each)
+
+---
+
+## 6. Dipole Array (`dipole_array.py`)
+
+**Purpose:** Demonstrates the `LinearDipoleArray` class with an 8-element half-wave dipole array at 5 GHz. Validates broadside and steered beam patterns with full mutual coupling via MoM.
+
+**What it does:**
+
+1. Builds an 8-element z-directed dipole array along x with 0.5-lambda spacing using `LinearDipoleArray`
+2. Fills the impedance matrix on the combined mesh (captures all mutual coupling)
+3. Solves for broadside (uniform excitation) and steered beams (30 deg, 45 deg)
+4. Computes H-plane far-field patterns and compares with analytical AF x element pattern
+5. Analyzes per-element terminal currents and active (scan) impedances
+6. Validates directivity, HPBW, beam steering accuracy, and element symmetry
+
+**Key output:**
+- D_max (expected ~11.2 dBi for N=8), HPBW (expected ~12.8 deg)
+- Per-element terminal currents and active impedances
+- Pass/fail on 5 validation criteria
+
+**Generated plots** (`images/`):
+
+| File | Content |
+|---|---|
+| `array_layout.png` | 2D layout of the 8-element array in the x-z plane |
+| `array_pattern_broadside.png` | H-plane pattern (rectangular + polar) for broadside |
+| `array_pattern_steered.png` | Steered beam patterns with MoM vs AF x element comparison |
+| `array_element_currents.png` | Terminal currents and active impedances per element |
+| `array_surface_current.png` | 3D surface current on all 8 elements |
+
+**Relevant code pattern — antenna array simulation:**
+
+```python
+from pyMoM3d import (
+    LinearDipoleArray, uniform_excitation, progressive_phase_excitation,
+    plot_array_layout, plot_surface_current,
+    c0, eta0,
+)
+
+# Build array
+array = LinearDipoleArray(
+    n_elements=8, spacing=0.03, frequency=5e9,
+    dipole_length=0.03, strip_width=0.002,
+    dipole_axis='z', array_axis='x',
+)
+
+# Fill Z-matrix (captures mutual coupling)
+Z = array.fill_impedance_matrix()
+
+# Broadside solve
+weights = uniform_excitation(8, voltage=1.0)
+I = array.solve(weights)
+
+# Far-field
+theta = np.linspace(0.001, np.pi, 361)
+E_th, E_ph = array.compute_far_field(I, theta, np.zeros_like(theta))
+
+# Beam steering
+beta = array.get_scan_phase_shift(theta_scan=np.radians(60), phi_scan=0)
+weights_steered = progressive_phase_excitation(8, beta)
+I_steered = array.solve(weights_steered)
+
+# Element analysis
+currents = array.compute_element_currents(I)
+impedances = array.compute_element_impedances(I, weights)
 ```
 
 ---
 
-## 6. STL/OBJ RCS Example (`stl_rcs_example.py`)
+## 7. Solver Performance Benchmark (`solver_performance.py`)
+
+**Purpose:** Benchmarks impedance matrix assembly and solver execution time across different mesh sizes to characterize scaling behavior.
+
+```bash
+python examples/solver_performance.py
+```
+
+---
+
+## 8. STL/OBJ RCS Example (`stl_rcs_example.py`)
 
 **Purpose:** Interactive workflow for loading an external mesh file (`.stl` or `.obj`), inspecting it, assessing mesh quality, optionally remeshing, and computing bistatic RCS and surface current.
 
@@ -396,17 +527,17 @@ The test suite is organized by module:
 Run all tests:
 
 ```bash
-PYTHONPATH=src pytest tests/ -v
+pytest tests/ -v
 ```
 
 Run a single test file:
 
 ```bash
-PYTHONPATH=src pytest tests/test_impedance.py -v
+pytest tests/test_impedance.py -v
 ```
 
 Run a single test:
 
 ```bash
-PYTHONPATH=src pytest tests/test_greens.py::TestSingularity::test_green_self_term_finite -v
+pytest tests/test_greens.py::TestSingularity::test_green_self_term_finite -v
 ```
