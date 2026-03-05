@@ -6,8 +6,8 @@ time, memory usage, and condition number.
 
 Usage
 -----
-    PYTHONPATH=src python examples/solver_performance.py
-    PYTHONPATH=src python examples/solver_performance.py --plot
+    python examples/solver_performance.py
+    python examples/solver_performance.py --plot
 """
 
 import argparse
@@ -33,12 +33,15 @@ from pyMoM3d.mom.solver import solve_direct, solve_gmres
 # ---------------------------------------------------------------------------
 # Fixed parameters
 # ---------------------------------------------------------------------------
-RADIUS = 0.1  # m
-FREQUENCY = 1.0e9  # Hz
+RADIUS = 0.1          # m
+FREQUENCY = 1.0e9     # Hz
 QUAD_ORDER = 4
 NEAR_THRESHOLD = 0.2
+COND_MAX_N = 1200     # skip expensive SVD cond number above this N
 
-EDGE_LENGTHS = [0.10, 0.065, 0.045, 0.035, 0.025, 0.020]
+# NOTE: 0.012 gives N≈2200 and may take several minutes for LU.
+# Comment it out for a quicker run.
+EDGE_LENGTHS = [0.10, 0.065, 0.045, 0.035, 0.025, 0.020, 0.015, 0.012]
 
 
 def timed_mesh(edge_len, radius):
@@ -148,8 +151,8 @@ def main():
         # Solve GMRES
         I_gmres, t_gmres, res_gmres, gmres_iters = timed_solve_gmres(Z, V)
 
-        # Condition number
-        cond = np.linalg.cond(Z)
+        # Condition number (skip expensive SVD for large N)
+        cond = np.linalg.cond(Z) if N <= COND_MAX_N else float('nan')
 
         row = {
             'target_edge_length_m': edge_len,
@@ -179,9 +182,10 @@ def main():
     csv_path = os.path.join(results_dir, "solver_performance.csv")
 
     fieldnames = [
-        'target_edge_length_m', 'num_triangles', 'N', 't_mesh_s', 't_fill_s',
-        't_solve_direct_s', 't_solve_gmres_s', 'gmres_iters',
-        'residual_direct', 'residual_gmres', 'cond', 'Z_memory_MB',
+        'target_edge_length_m', 'num_triangles', 'N', 'mean_edge_length',
+        't_mesh_s', 't_fill_s', 't_solve_direct_s', 't_solve_gmres_s',
+        'gmres_iters', 'residual_direct', 'residual_gmres', 'cond',
+        'Z_memory_MB', 'fill_rate',
     ]
     with open(csv_path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
@@ -204,33 +208,42 @@ def main():
             t_gmres_list = [r['t_solve_gmres_s'] for r in results]
             Z_MBs = [r['Z_memory_MB'] for r in results]
 
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 5))
 
             # Left: timing vs N
             ax1.loglog(Ns, t_fills, 'o-', label=r'$\mathbf{Z}$ fill')
             ax1.loglog(Ns, t_directs, 's-', label='Direct (LU)')
             ax1.loglog(Ns, t_gmres_list, '^-', label='GMRES')
-            # Reference slopes
+            # Reference slopes anchored at last (most reliable) data point
             N_ref = np.array(Ns, dtype=float)
-            ax1.loglog(N_ref, t_fills[0] * (N_ref / N_ref[0])**2,
+            ax1.loglog(N_ref, t_fills[-1] * (N_ref / N_ref[-1])**2,
                        '--', color='gray', alpha=0.5, label=r'$\sim N^2$')
-            ax1.loglog(N_ref, max(t_directs[0], 1e-4) * (N_ref / N_ref[0])**3,
+            ax1.loglog(N_ref, t_directs[-1] * (N_ref / N_ref[-1])**3,
                        ':', color='gray', alpha=0.5, label=r'$\sim N^3$')
             ax1.set_xlabel(r'$N$ (basis functions)')
-            ax1.set_ylabel(r'Time (s)')
+            ax1.set_ylabel(r'Time $t$ (s)')
             ax1.set_title(r'Solver Timing')
             ax1.legend()
             ax1.grid(True, which='both', alpha=0.3)
 
             # Right: memory vs N
             ax2.loglog(Ns, Z_MBs, 'o-', label=r'$\mathbf{Z}$ matrix')
-            ax2.loglog(N_ref, Z_MBs[0] * (N_ref / N_ref[0])**2,
+            ax2.loglog(N_ref, Z_MBs[-1] * (N_ref / N_ref[-1])**2,
                        '--', color='gray', alpha=0.5, label=r'$\sim N^2$')
             ax2.set_xlabel(r'$N$ (basis functions)')
             ax2.set_ylabel(r'Memory (MB)')
             ax2.set_title(r'$\mathbf{Z}$ Matrix Memory')
             ax2.legend()
             ax2.grid(True, which='both', alpha=0.3)
+
+            # Third panel: GMRES iterations vs N
+            gmres_iters_list = [r['gmres_iters'] for r in results]
+            ax3.plot(Ns, gmres_iters_list, 'D-', color='C3', label=r'GMRES iterations')
+            ax3.set_xlabel(r'$N$ (basis functions)')
+            ax3.set_ylabel(r'Iterations')
+            ax3.set_title(r'GMRES Convergence')
+            ax3.legend()
+            ax3.grid(True, which='both', alpha=0.3)
 
             fig.tight_layout()
             images_dir = os.path.join(root, "images")
