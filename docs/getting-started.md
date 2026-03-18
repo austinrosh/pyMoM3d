@@ -215,6 +215,4 @@ pyMoM3d/
 
 ## Next Steps
 
-- [Architecture Guide](architecture.md) — how the solver pipeline works and the math behind it
-- [API Reference](api-reference.md) — complete module, class, and function reference
 - [Examples Guide](examples-guide.md) — detailed walkthrough of each example

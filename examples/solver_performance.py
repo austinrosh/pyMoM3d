@@ -111,10 +111,102 @@ def timed_solve_gmres(Z, V):
     return I, elapsed, residual, iter_count[0]
 
 
+def make_plot(results, root):
+    """Generate and save the 3-panel scaling figure."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from pyMoM3d import configure_latex_style
+        configure_latex_style()
+
+        Ns = [r['N'] for r in results]
+        t_fills = [r['t_fill_s'] for r in results]
+        t_directs = [r['t_solve_direct_s'] for r in results]
+        t_gmres_list = [r['t_solve_gmres_s'] for r in results]
+        Z_MBs = [r['Z_memory_MB'] for r in results]
+
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 5))
+
+        # Left: timing vs N
+        ax1.loglog(Ns, t_fills, 'o-', label=r'$\mathbf{Z}$ fill')
+        ax1.loglog(Ns, t_directs, 's-', label='Direct (LU)')
+        ax1.loglog(Ns, t_gmres_list, '^-', label='GMRES')
+        N_ref = np.array(Ns, dtype=float)
+        ax1.loglog(N_ref, t_fills[-1] * (N_ref / N_ref[-1])**2,
+                   '--', color='gray', alpha=0.5, label=r'$\sim N^2$')
+        ax1.loglog(N_ref, t_directs[-1] * (N_ref / N_ref[-1])**3,
+                   ':', color='gray', alpha=0.5, label=r'$\sim N^3$')
+        ax1.set_xlabel(r'$N$ (basis functions)')
+        ax1.set_ylabel(r'Time $t$ (s)')
+        ax1.set_title(r'Solver Timing')
+        ax1.legend()
+        ax1.grid(True, which='both', alpha=0.3)
+
+        # Middle: memory vs N
+        ax2.loglog(Ns, Z_MBs, 'o-', label=r'$\mathbf{Z}$ matrix')
+        ax2.loglog(N_ref, Z_MBs[-1] * (N_ref / N_ref[-1])**2,
+                   '--', color='gray', alpha=0.5, label=r'$\sim N^2$')
+        ax2.set_xlabel(r'$N$ (basis functions)')
+        ax2.set_ylabel(r'Memory (MB)')
+        ax2.set_title(r'$\mathbf{Z}$ Matrix Memory')
+        ax2.legend()
+        ax2.grid(True, which='both', alpha=0.3)
+
+        # Right: GMRES iterations vs N
+        gmres_iters_list = [r['gmres_iters'] for r in results]
+        ax3.plot(Ns, gmres_iters_list, 'D-', color='C3', label=r'GMRES iterations')
+        ax3.set_xlabel(r'$N$ (basis functions)')
+        ax3.set_ylabel(r'Iterations')
+        ax3.set_title(r'GMRES Convergence')
+        ax3.legend()
+        ax3.grid(True, which='both', alpha=0.3)
+
+        fig.tight_layout()
+        images_dir = os.path.join(root, "images")
+        os.makedirs(images_dir, exist_ok=True)
+        plot_path = os.path.join(images_dir, "solver_performance.png")
+        fig.savefig(plot_path, dpi=150)
+        print(f"Plot saved to {plot_path}")
+        plt.close(fig)
+
+    except ImportError:
+        print("matplotlib not available — skipping plot")
+
+
+def load_results_from_csv(csv_path):
+    """Load benchmark results from a previously written CSV."""
+    results = []
+    with open(csv_path, newline='') as f:
+        for row in csv.DictReader(f):
+            results.append({
+                'N': int(row['N']),
+                't_fill_s': float(row['t_fill_s']),
+                't_solve_direct_s': float(row['t_solve_direct_s']),
+                't_solve_gmres_s': float(row['t_solve_gmres_s']),
+                'gmres_iters': int(row['gmres_iters']),
+                'Z_memory_MB': float(row['Z_memory_MB']),
+            })
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description="pyMoM3d solver performance analysis")
-    parser.add_argument("--plot", action="store_true", help="Generate scaling plot")
+    parser.add_argument("--plot", action="store_true", help="Generate scaling plot after simulation")
+    parser.add_argument("--plot-only", action="store_true",
+                        help="Skip simulation; plot from existing results/solver_performance.csv")
     args = parser.parse_args()
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    csv_path = os.path.join(root, "results", "solver_performance.csv")
+
+    if args.plot_only:
+        if not os.path.exists(csv_path):
+            print(f"No CSV found at {csv_path}. Run without --plot-only first.")
+            return
+        results = load_results_from_csv(csv_path)
+        make_plot(results, root)
+        return
 
     k = 2 * np.pi * FREQUENCY / c0
     eta = eta0
@@ -176,10 +268,8 @@ def main():
               f"{t_direct:>7.2f}s  {t_gmres:>7.2f}s  {gmres_iters:>8}  {Z_MB:>6.2f}  {cond:>10.2e}")
 
     # Write CSV
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     results_dir = os.path.join(root, "results")
     os.makedirs(results_dir, exist_ok=True)
-    csv_path = os.path.join(results_dir, "solver_performance.csv")
 
     fieldnames = [
         'target_edge_length_m', 'num_triangles', 'N', 'mean_edge_length',
@@ -193,68 +283,8 @@ def main():
         writer.writerows(results)
     print(f"\nCSV written to {csv_path}")
 
-    # Optional plot
     if args.plot:
-        try:
-            import matplotlib
-            matplotlib.use('Agg')
-            import matplotlib.pyplot as plt
-            from pyMoM3d import configure_latex_style
-            configure_latex_style()
-
-            Ns = [r['N'] for r in results]
-            t_fills = [r['t_fill_s'] for r in results]
-            t_directs = [r['t_solve_direct_s'] for r in results]
-            t_gmres_list = [r['t_solve_gmres_s'] for r in results]
-            Z_MBs = [r['Z_memory_MB'] for r in results]
-
-            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 5))
-
-            # Left: timing vs N
-            ax1.loglog(Ns, t_fills, 'o-', label=r'$\mathbf{Z}$ fill')
-            ax1.loglog(Ns, t_directs, 's-', label='Direct (LU)')
-            ax1.loglog(Ns, t_gmres_list, '^-', label='GMRES')
-            # Reference slopes anchored at last (most reliable) data point
-            N_ref = np.array(Ns, dtype=float)
-            ax1.loglog(N_ref, t_fills[-1] * (N_ref / N_ref[-1])**2,
-                       '--', color='gray', alpha=0.5, label=r'$\sim N^2$')
-            ax1.loglog(N_ref, t_directs[-1] * (N_ref / N_ref[-1])**3,
-                       ':', color='gray', alpha=0.5, label=r'$\sim N^3$')
-            ax1.set_xlabel(r'$N$ (basis functions)')
-            ax1.set_ylabel(r'Time $t$ (s)')
-            ax1.set_title(r'Solver Timing')
-            ax1.legend()
-            ax1.grid(True, which='both', alpha=0.3)
-
-            # Right: memory vs N
-            ax2.loglog(Ns, Z_MBs, 'o-', label=r'$\mathbf{Z}$ matrix')
-            ax2.loglog(N_ref, Z_MBs[-1] * (N_ref / N_ref[-1])**2,
-                       '--', color='gray', alpha=0.5, label=r'$\sim N^2$')
-            ax2.set_xlabel(r'$N$ (basis functions)')
-            ax2.set_ylabel(r'Memory (MB)')
-            ax2.set_title(r'$\mathbf{Z}$ Matrix Memory')
-            ax2.legend()
-            ax2.grid(True, which='both', alpha=0.3)
-
-            # Third panel: GMRES iterations vs N
-            gmres_iters_list = [r['gmres_iters'] for r in results]
-            ax3.plot(Ns, gmres_iters_list, 'D-', color='C3', label=r'GMRES iterations')
-            ax3.set_xlabel(r'$N$ (basis functions)')
-            ax3.set_ylabel(r'Iterations')
-            ax3.set_title(r'GMRES Convergence')
-            ax3.legend()
-            ax3.grid(True, which='both', alpha=0.3)
-
-            fig.tight_layout()
-            images_dir = os.path.join(root, "images")
-            os.makedirs(images_dir, exist_ok=True)
-            plot_path = os.path.join(images_dir, "solver_performance.png")
-            fig.savefig(plot_path, dpi=150)
-            print(f"Plot saved to {plot_path}")
-            plt.close(fig)
-
-        except ImportError:
-            print("matplotlib not available — skipping plot")
+        make_plot(results, root)
 
 
 if __name__ == '__main__':
