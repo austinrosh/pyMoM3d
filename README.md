@@ -146,7 +146,6 @@ pytest tests/ -v
 ## Documentation
 
 - [Getting Started](docs/getting-started.md) - Installation, quick start, running tests and examples
-- [Architecture Guide](docs/architecture.md) - Solver pipeline, EM theory, singularity extraction
 - [Examples Guide](docs/examples-guide.md) - Detailed walkthrough of each example with code patterns
 
 ## References
