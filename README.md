@@ -28,6 +28,8 @@ A Python implementation of the 3D Method of Moments (MoM) electromagnetic solver
 ## Quick Start
 
 ```bash
+git clone https://github.com/your-username/pyMoM3d.git
+cd pyMoM3d
 pip install -r requirements.txt
 pip install -e .
 python examples/sphere_rcs_validation.py
@@ -78,8 +80,6 @@ sim = Simulation(
 )
 result = sim.run()
 ```
-
-The trimesh mesher is still available (`mesher='trimesh'`, the default) for backward compatibility.
 
 ## Examples
 
