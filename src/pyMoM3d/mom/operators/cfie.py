@@ -4,7 +4,7 @@ import numpy as np
 
 from .base import AbstractOperator
 from .efie import EFIEOperator
-from .mfie import MFIEOperator, compute_gram_matrix
+from .mfie import MFIEOperator, compute_cross_gram_matrix
 
 # ---------------------------------------------------------------------------
 # Optional fast backends
@@ -167,11 +167,11 @@ class CFIEOperator(AbstractOperator):
         return self.alpha * z_efie + (1.0 - self.alpha) * eta * z_mfie
 
     def post_assembly(self, Z, rwg_basis, mesh, k, eta) -> None:
-        """Validate closed surface; add (1−α)·η·(1/2)·B Gram term."""
+        """Validate closed surface; add (1−α)·η·(1/2)·B̃ cross-Gram term."""
         if rwg_basis.num_boundary_edges > 0:
             raise ValueError(
                 "CFIEOperator requires a closed surface "
                 f"(found {rwg_basis.num_boundary_edges} boundary edge(s))."
             )
-        B = compute_gram_matrix(rwg_basis, mesh)
+        B = compute_cross_gram_matrix(rwg_basis, mesh)
         Z += 0.5 * (1.0 - self.alpha) * eta * B

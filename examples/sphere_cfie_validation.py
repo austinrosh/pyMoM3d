@@ -75,7 +75,7 @@ def main():
     ka_tail   = np.linspace(3.0, 3.5, 6)[1:]
     ka_values = np.concatenate([ka_coarse, ka_fine, ka_tail])
 
-    # The resonant ka closest to 2.74
+    # Resonant ka: target near 2.74; will be updated to peak-κ after sweep
     ka_res = ka_values[np.argmin(np.abs(ka_values - 2.74))]
     f_res  = ka_res * c0 / (2.0 * np.pi * radius)
 
@@ -137,9 +137,12 @@ def main():
               f"{rcs_mie[i]:8.2f}  {cond_efie[i]:10.2e}  {cond_cfie[i]:10.2e}")
 
     # ----------------------------------------------------------------
-    # Bistatic RCS at resonant ka
+    # Bistatic RCS at the ka where EFIE is most ill-conditioned
     # ----------------------------------------------------------------
-    print(f"\n--- Bistatic RCS at ka={ka_res:.3f}, f={f_res/1e9:.3f} GHz ---")
+    # Pick ka with maximum κ(EFIE) — this is where resonance suppression matters most
+    ka_res = ka_values[np.argmax(cond_efie)]
+    f_res  = ka_res * c0 / (2.0 * np.pi * radius)
+    print(f"\n--- Bistatic RCS at ka={ka_res:.3f} (peak κ(EFIE)={cond_efie.max():.1f}), f={f_res/1e9:.3f} GHz ---")
     k_res = 2.0 * np.pi * f_res / c0
 
     Z_efie_res = fill_matrix(op_efie, basis, mesh, k_res, eta0, backend='auto')

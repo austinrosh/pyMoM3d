@@ -105,6 +105,81 @@ def compute_gram_matrix(rwg_basis, mesh) -> np.ndarray:
     return B
 
 
+def compute_cross_gram_matrix(rwg_basis, mesh) -> np.ndarray:
+    """Compute the cross-Gram matrix for n̂×RWG testing.
+
+    B̃_mn = ∫_S (n̂×f_m)(r) · f_n(r) dS
+
+    Using the scalar triple product identity (n̂×A)·B = n̂·(A×B):
+
+        B̃_mn = ∫_T n̂_T · (ρ_m(r) × ρ_n(r)) dA
+
+    Analytical formula for one triangle:
+
+        ∫_T n̂·((r−a)×(r−b)) dA = A_T · n̂·((b−a)×r̄ + a×b)
+
+    where a = r_fv_m, b = r_fv_n, r̄ = centroid.
+
+    B̃ is real and antisymmetric (B̃_mn = −B̃_nm).
+
+    Parameters
+    ----------
+    rwg_basis : RWGBasis
+    mesh : Mesh
+
+    Returns
+    -------
+    B_tilde : ndarray, shape (N, N), float64
+    """
+    N = rwg_basis.num_basis
+    verts = mesh.vertices
+    tris  = mesh.triangles
+
+    tri_to_basis = {}
+    for m in range(N):
+        for tri, sign, area in (
+            (int(rwg_basis.t_plus[m]),  +1.0, float(rwg_basis.area_plus[m])),
+            (int(rwg_basis.t_minus[m]), -1.0, float(rwg_basis.area_minus[m])),
+        ):
+            tri_to_basis.setdefault(tri, []).append((m, sign, area))
+
+    B = np.zeros((N, N), dtype=np.float64)
+
+    for tri, entries in tri_to_basis.items():
+        v0, v1, v2 = verts[tris[tri, 0]], verts[tris[tri, 1]], verts[tris[tri, 2]]
+        cross = np.cross(v1 - v0, v2 - v0)
+        A_T = 0.5 * np.linalg.norm(cross)
+        if A_T < 1e-30:
+            continue
+        n_hat    = cross / (2.0 * A_T)
+        centroid = (v0 + v1 + v2) / 3.0
+
+        for m, sign_m, A_m in entries:
+            a = verts[
+                int(rwg_basis.free_vertex_plus[m])
+                if sign_m > 0 else
+                int(rwg_basis.free_vertex_minus[m])
+            ]
+            l_m   = float(rwg_basis.edge_length[m])
+            amp_m = sign_m * l_m / (2.0 * A_m)
+
+            for n, sign_n, A_n in entries:
+                b = verts[
+                    int(rwg_basis.free_vertex_plus[n])
+                    if sign_n > 0 else
+                    int(rwg_basis.free_vertex_minus[n])
+                ]
+                l_n   = float(rwg_basis.edge_length[n])
+                amp_n = sign_n * l_n / (2.0 * A_n)
+
+                # ∫_T n̂·((r−a)×(r−b)) dA = A_T · n̂·((b−a)×r̄ + a×b)
+                integral = A_T * np.dot(n_hat,
+                                        np.cross(b - a, centroid) + np.cross(a, b))
+                B[m, n] += amp_m * amp_n * integral
+
+    return B
+
+
 # ---------------------------------------------------------------------------
 # MFIEOperator
 # ---------------------------------------------------------------------------
@@ -211,17 +286,23 @@ class MFIEOperator(AbstractOperator):
         is_near,
         n_hat_test,
     ) -> complex:
-        """Compute MFIE K-term contribution from one triangle pair.
+        """Compute MFIE K-term (n̂×RWG-tested) for one triangle pair.
 
-        Uses higher-order quadrature for near pairs to mitigate the O(1/R)
-        near-field singularity of the MFIE kernel.
+        Uses the n̂×RWG testing scheme, which gives a kernel with no explicit
+        n̂ dependence in the double-quadrature loop:
+
+            K_mn = -∫∫ G_kernel(R) · R_vec · (ρ_m × ρ_n) dS' dS
+
+        This discretisation is spectrally compatible with the EFIE, enabling
+        accurate CFIE combinations.
+
+        Near pairs use higher-order quadrature.
         """
         verts_test = mesh.vertices[mesh.triangles[tri_test]]
         verts_src  = mesh.vertices[mesh.triangles[tri_src]]
         r_fv_test  = mesh.vertices[fv_test]
         r_fv_src   = mesh.vertices[fv_src]
 
-        # Use denser quadrature for near pairs
         if is_near:
             q = min(quad_order + 3, 13)
             w, b = triangle_quad_rule(q)
@@ -232,28 +313,26 @@ class MFIEOperator(AbstractOperator):
         I_K_raw = 0.0 + 0.0j
 
         for i in range(len(w)):
-            r_obs  = (b[i, 0] * verts_test[0]
-                      + b[i, 1] * verts_test[1]
-                      + b[i, 2] * verts_test[2])
-            rho_m  = r_obs - r_fv_test
+            r_obs = (b[i, 0] * verts_test[0]
+                     + b[i, 1] * verts_test[1]
+                     + b[i, 2] * verts_test[2])
+            rho_m = r_obs - r_fv_test
 
             I_K_inner = 0.0 + 0.0j
             for j in range(len(w)):
-                r_src  = (b[j, 0] * verts_src[0]
-                          + b[j, 1] * verts_src[1]
-                          + b[j, 2] * verts_src[2])
-                rho_n  = r_src - r_fv_src
-                R_vec  = r_obs - r_src
-                R      = np.linalg.norm(R_vec)
+                r_src = (b[j, 0] * verts_src[0]
+                         + b[j, 1] * verts_src[1]
+                         + b[j, 2] * verts_src[2])
+                rho_n = r_src - r_fv_src
+                R_vec = r_obs - r_src
+                R     = np.linalg.norm(R_vec)
                 if R < 1e-30:
                     continue
-                # C = n̂·(r−r') * (1+jkR)*exp(−jkR) / (4πR³)
-                jkR = 1j * k * R
-                C = (np.dot(n_hat_test, R_vec)
-                     * (1.0 + jkR)
-                     * np.exp(-jkR)
-                     / (four_pi * R ** 3))
-                I_K_inner += w[j] * np.dot(rho_m, rho_n) * C
+                # n̂×RWG kernel: G_kernel · R_vec · (ρ_m × ρ_n)
+                jkR      = 1j * k * R
+                G_kernel = (1.0 + jkR) * np.exp(-jkR) / (four_pi * R ** 3)
+                cross_mn = np.cross(rho_m, rho_n)
+                I_K_inner += w[j] * (G_kernel * np.dot(R_vec, cross_mn))
 
             I_K_inner *= twice_area_src
             I_K_raw   += w[i] * I_K_inner
@@ -265,11 +344,11 @@ class MFIEOperator(AbstractOperator):
         return scale * I_K_raw
 
     def post_assembly(self, Z, rwg_basis, mesh, k, eta) -> None:
-        """Add the (1/2) Gram matrix identity term."""
+        """Add the (1/2) cross-Gram identity term for n̂×RWG testing."""
         if rwg_basis.num_boundary_edges > 0:
             raise ValueError(
                 "MFIEOperator requires a closed surface "
                 f"(found {rwg_basis.num_boundary_edges} boundary edge(s))."
             )
-        B = compute_gram_matrix(rwg_basis, mesh)
+        B = compute_cross_gram_matrix(rwg_basis, mesh)
         Z += 0.5 * B

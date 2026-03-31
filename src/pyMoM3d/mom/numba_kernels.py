@@ -508,16 +508,16 @@ if NUMBA_AVAILABLE:
                 R = np.linalg.norm(R_vec)
                 if R < 1e-30:
                     continue
-                # MFIE kernel: n̂·(r−r') * (1+jkR)*exp(−jkR) / (4πR³)
+                # n̂×RWG kernel: −G_kernel · R_vec · (ρ_m × ρ_n)
                 jkR = 1j * k * R
-                ndot = (n_hat_test[0] * R_vec[0]
-                        + n_hat_test[1] * R_vec[1]
-                        + n_hat_test[2] * R_vec[2])
-                C = ndot * (1.0 + jkR) * np.exp(-jkR) / (four_pi * R ** 3)
-                rdot = (rho_m[0] * rho_n[0]
-                        + rho_m[1] * rho_n[1]
-                        + rho_m[2] * rho_n[2])
-                I_K_inner += w[j] * rdot * C
+                G_kernel = (1.0 + jkR) * np.exp(-jkR) / (four_pi * R ** 3)
+                cross_x = rho_m[1] * rho_n[2] - rho_m[2] * rho_n[1]
+                cross_y = rho_m[2] * rho_n[0] - rho_m[0] * rho_n[2]
+                cross_z = rho_m[0] * rho_n[1] - rho_m[1] * rho_n[0]
+                R_dot_cross = (R_vec[0] * cross_x
+                               + R_vec[1] * cross_y
+                               + R_vec[2] * cross_z)
+                I_K_inner += w[j] * (G_kernel * R_dot_cross)
 
             I_K_inner *= twice_area_src
             I_K_raw   += w[i] * I_K_inner
@@ -739,15 +739,16 @@ if NUMBA_AVAILABLE:
                 R = np.linalg.norm(R_vec)
                 if R < 1e-30:
                     continue
+                # n̂×RWG kernel: −G_kernel · R_vec · (ρ_m × ρ_n)
                 jkR = 1j * k * R
-                ndot = (n_hat_test[0] * R_vec[0]
-                        + n_hat_test[1] * R_vec[1]
-                        + n_hat_test[2] * R_vec[2])
-                C = ndot * (1.0 + jkR) * np.exp(-jkR) / (four_pi * R ** 3)
-                rdot = (rho_m[0] * rho_n[0]
-                        + rho_m[1] * rho_n[1]
-                        + rho_m[2] * rho_n[2])
-                I_K_inner += w[j] * rdot * C
+                G_kernel = (1.0 + jkR) * np.exp(-jkR) / (four_pi * R ** 3)
+                cross_x = rho_m[1] * rho_n[2] - rho_m[2] * rho_n[1]
+                cross_y = rho_m[2] * rho_n[0] - rho_m[0] * rho_n[2]
+                cross_z = rho_m[0] * rho_n[1] - rho_m[1] * rho_n[0]
+                R_dot_cross = (R_vec[0] * cross_x
+                               + R_vec[1] * cross_y
+                               + R_vec[2] * cross_z)
+                I_K_inner += w[j] * (G_kernel * R_dot_cross)
 
             I_K_inner *= twice_area_src
             I_K_raw   += w[i] * I_K_inner

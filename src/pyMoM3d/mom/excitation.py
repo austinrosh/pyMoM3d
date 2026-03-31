@@ -129,7 +129,6 @@ class PlaneWaveExcitation(Excitation):
 
                 cross = np.cross(verts[1] - verts[0], verts[2] - verts[0])
                 twice_area = np.linalg.norm(cross)
-                n_hat = cross / (twice_area if twice_area > 1e-30 else 1.0)
 
                 scale = sign * rwg_basis.edge_length[n] / (2.0 * area)
 
@@ -139,10 +138,9 @@ class PlaneWaveExcitation(Excitation):
                          + bary[i, 2] * verts[2])
                     rho   = r - r_fv
                     H_inc = H_amp * np.exp(-1j * k * np.dot(self.k_hat, r))
-                    # f_m · (n̂ × H_inc) = (f_m × n̂) · H_inc  [scalar triple product]
-                    # equivalently: rho_scaled · (n̂ × H_inc)
-                    nxH = np.cross(n_hat, H_inc)
-                    V[n] += weights[i] * np.dot(rho, nxH) * scale * twice_area
+                    # n̂×RWG testing: V_m = ∫ f_m · H_inc dS
+                    # (n̂·f_m = 0, so only the tangential part of H_inc contributes)
+                    V[n] += weights[i] * np.dot(rho, H_inc) * scale * twice_area
 
         return V
 

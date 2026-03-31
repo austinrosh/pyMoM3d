@@ -354,10 +354,12 @@ static inline v3 load_normal(const double* tri_normals, int tri) noexcept {
 }
 
 // ---------------------------------------------------------------------------
-// MFIE single triangle-pair kernel  →  I_K
+// MFIE single triangle-pair kernel  →  I_K  (n̂×RWG testing)
 //
-// Computes the scaled K-term integral:
-//   I_K = scale * ∫∫ (ρ_m·ρ_n) * n̂_m·(r−r')*(1+jkR)*exp(−jkR)/(4πR³) dS' dS
+// Uses the n̂×RWG testing scheme for spectral compatibility with EFIE:
+//   I_K = scale * ∫∫ [G_kernel · R_vec · (ρ_m × ρ_n)] dS' dS
+// where G_kernel = (1+jkR)*exp(−jkR)/(4πR³), R_vec = r−r'.
+// No explicit n̂ dependence in the kernel.
 //
 // Near pairs use higher-order quadrature (nq_near / weights_near / bary_near).
 // ---------------------------------------------------------------------------
@@ -395,12 +397,15 @@ static inline cd triangle_pair_mfie(
             double R  = norm3(R_vec);
             if (R < 1e-30) continue;
 
-            // MFIE kernel: C = n̂·(r−r') * (1+jkR)*exp(−jkR) / (4πR³)
-            double ndot = dot3(n_hat_test, R_vec);
-            double rdot = dot3(rho_m, rho_n);
+            // n̂×RWG kernel: −G_kernel · R_vec · (ρ_m × ρ_n)
             cd jkR{0.0, k * R};
-            cd C = ndot * (cd{1.0, 0.0} + jkR) * std::exp(-jkR) / (four_pi * R * R * R);
-            I_K_inner += w_use[j] * rdot * C;
+            cd G_kernel = (cd{1.0, 0.0} + jkR) * std::exp(-jkR) / (four_pi * R * R * R);
+            // cross product ρ_m × ρ_n
+            double cross_x = rho_m[1]*rho_n[2] - rho_m[2]*rho_n[1];
+            double cross_y = rho_m[2]*rho_n[0] - rho_m[0]*rho_n[2];
+            double cross_z = rho_m[0]*rho_n[1] - rho_m[1]*rho_n[0];
+            double R_dot_cross = R_vec[0]*cross_x + R_vec[1]*cross_y + R_vec[2]*cross_z;
+            I_K_inner += w_use[j] * (G_kernel * R_dot_cross);
         }
         I_K_inner *= twice_area_src;
         I_K_raw   += w_use[i] * I_K_inner;
