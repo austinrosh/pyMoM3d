@@ -17,7 +17,6 @@ build/
 # -------------------------
 .venv/
 venv/
-env/
 
 # -------------------------
 # IDE / editor
@@ -52,3 +51,11 @@ htmlcov/
 # Notebooks
 # -------------------------
 .ipynb_checkpoints/
+
+# -------------------------
+# Docs
+# -------------------------
+docs/plans/
+docs/theory
+docs/tutorial/api-reference.md
+docs/tutorial/architecture.md

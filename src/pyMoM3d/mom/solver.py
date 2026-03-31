@@ -21,9 +21,6 @@ def solve_direct(Z: np.ndarray, V: np.ndarray) -> np.ndarray:
     I : ndarray, shape (N,), complex128
         Current coefficients.
     """
-    cond = np.linalg.cond(Z)
-    logger.info(f"Condition number: {cond:.2e}")
-
     I = np.linalg.solve(Z, V)
 
     residual = np.linalg.norm(Z @ I - V) / np.linalg.norm(V)

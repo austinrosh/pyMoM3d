@@ -21,6 +21,13 @@ from ..mesh.mesh_data import Mesh
 from ..mesh.rwg_basis import RWGBasis
 from ..greens.quadrature import triangle_quad_rule
 from ..greens.singularity import integrate_green_singular, integrate_rho_green_singular
+from .numba_kernels import NUMBA_AVAILABLE, fill_Z_numba
+
+try:
+    from ._cpp_kernels import fill_impedance_cpp as _fill_impedance_cpp
+    CPP_AVAILABLE = True
+except ImportError:
+    CPP_AVAILABLE = False
 
 
 def _compute_triangle_pair(
@@ -38,6 +45,11 @@ def _compute_triangle_pair(
     A_src: float,
     quad_order: int,
     near_threshold: float,
+    weights: np.ndarray,
+    bary: np.ndarray,
+    twice_area_test: float,
+    twice_area_src: float,
+    is_near: bool,
 ):
     """Compute A-term and Phi-term contribution from one triangle pair.
 
@@ -46,35 +58,27 @@ def _compute_triangle_pair(
                 double_integral (r - r_fv_test) . (r' - r_fv_src) * g(r,r') dS dS'
         I_Phi = (sign_test * l_test / A_test) * (sign_src * l_src / A_src) *
                 double_integral g(r,r') dS dS'
+
+    Parameters
+    ----------
+    weights, bary : ndarray
+        Precomputed quadrature rule (from triangle_quad_rule).
+    twice_area_test, twice_area_src : float
+        Precomputed 2 * triangle area (= ||(v1-v0) x (v2-v0)||).
+    is_near : bool
+        Precomputed near-field flag (True → use singularity extraction).
     """
     verts_test = mesh.vertices[mesh.triangles[tri_test]]
     verts_src = mesh.vertices[mesh.triangles[tri_src]]
     r_fv_test = mesh.vertices[fv_test]
     r_fv_src = mesh.vertices[fv_src]
 
-    weights_o, bary_o = triangle_quad_rule(quad_order)
-    cross_test = np.cross(verts_test[1] - verts_test[0], verts_test[2] - verts_test[0])
-    twice_area_test = np.linalg.norm(cross_test)
-
-    weights_s, bary_s = triangle_quad_rule(quad_order)
-    cross_src = np.cross(verts_src[1] - verts_src[0], verts_src[2] - verts_src[0])
-    twice_area_src = np.linalg.norm(cross_src)
-
-    # Check if triangles are the same or adjacent (need singularity handling)
-    centroid_test = np.mean(verts_test, axis=0)
-    centroid_src = np.mean(verts_src, axis=0)
-    mean_edge = (np.linalg.norm(verts_src[1] - verts_src[0])
-                 + np.linalg.norm(verts_src[2] - verts_src[1])
-                 + np.linalg.norm(verts_src[0] - verts_src[2])) / 3.0
-    dist = np.linalg.norm(centroid_test - centroid_src)
-    is_near = dist < near_threshold * mean_edge * 3.0 if mean_edge > 1e-30 else True
-
     I_A_raw = 0.0 + 0.0j
     I_Phi_raw = 0.0 + 0.0j
 
-    for i in range(len(weights_o)):
-        r_obs = (bary_o[i, 0] * verts_test[0] + bary_o[i, 1] * verts_test[1]
-                 + bary_o[i, 2] * verts_test[2])
+    for i in range(len(weights)):
+        r_obs = (bary[i, 0] * verts_test[0] + bary[i, 1] * verts_test[1]
+                 + bary[i, 2] * verts_test[2])
         rho_test = r_obs - r_fv_test
 
         if is_near:
@@ -85,15 +89,15 @@ def _compute_triangle_pair(
             )
         else:
             g_int = 0.0 + 0.0j
-            for j in range(len(weights_s)):
-                r_prime = (bary_s[j, 0] * verts_src[0] + bary_s[j, 1] * verts_src[1]
-                           + bary_s[j, 2] * verts_src[2])
+            for j in range(len(weights)):
+                r_prime = (bary[j, 0] * verts_src[0] + bary[j, 1] * verts_src[1]
+                           + bary[j, 2] * verts_src[2])
                 R = np.linalg.norm(r_obs - r_prime)
-                g_int += weights_s[j] * np.exp(-1j * k * R) / (4.0 * np.pi * R)
+                g_int += weights[j] * np.exp(-1j * k * R) / (4.0 * np.pi * R)
             g_int *= twice_area_src
 
         # Scalar potential: just needs integral of g
-        I_Phi_raw += weights_o[i] * g_int
+        I_Phi_raw += weights[i] * g_int
 
         # Vector potential: needs integral of rho_src * g
         # integral_src (r' - r_fv_src) * g(r_obs, r') dS'
@@ -104,18 +108,18 @@ def _compute_triangle_pair(
             )
         else:
             rho_src_g_int = np.zeros(3, dtype=np.complex128)
-            for j in range(len(weights_s)):
-                r_prime = (bary_s[j, 0] * verts_src[0] + bary_s[j, 1] * verts_src[1]
-                           + bary_s[j, 2] * verts_src[2])
+            for j in range(len(weights)):
+                r_prime = (bary[j, 0] * verts_src[0] + bary[j, 1] * verts_src[1]
+                           + bary[j, 2] * verts_src[2])
                 rho_src = r_prime - r_fv_src
                 R = np.linalg.norm(r_obs - r_prime)
                 if R < 1e-30:
                     R = 1e-30
                 g_val = np.exp(-1j * k * R) / (4.0 * np.pi * R)
-                rho_src_g_int += weights_s[j] * rho_src * g_val
+                rho_src_g_int += weights[j] * rho_src * g_val
             rho_src_g_int *= twice_area_src
 
-        I_A_raw += weights_o[i] * np.dot(rho_test, rho_src_g_int)
+        I_A_raw += weights[i] * np.dot(rho_test, rho_src_g_int)
 
     I_A_raw *= twice_area_test
     I_Phi_raw *= twice_area_test
@@ -135,6 +139,7 @@ def fill_impedance_matrix(
     quad_order: int = 4,
     near_threshold: float = 0.2,
     progress_callback=None,
+    backend: str = 'auto',
 ) -> np.ndarray:
     """Assemble the EFIE impedance matrix.
 
@@ -154,42 +159,147 @@ def fill_impedance_matrix(
         Near-field threshold for singularity extraction.
     progress_callback : callable, optional
         Called once per completed outer row with ``progress_callback(fraction)``
-        where *fraction* is in [0, 1).
+        where *fraction* is in [0, 1).  Ignored when backend='numba'.
+    backend : str
+        Compute backend: ``'auto'`` (default), ``'numpy'``, or ``'numba'``.
+        ``'auto'`` selects numba if available, otherwise numpy.
 
     Returns
     -------
     Z : ndarray, shape (N, N), complex128
         Impedance matrix.
     """
+    # Resolve 'auto': prefer cpp → numba → numpy
+    if backend == 'auto':
+        if CPP_AVAILABLE:
+            backend = 'cpp'
+        elif NUMBA_AVAILABLE:
+            backend = 'numba'
+        else:
+            backend = 'numpy'
+
+    if backend == 'cpp' and not CPP_AVAILABLE:
+        raise RuntimeError("backend='cpp' requested but the C++ extension is not built. "
+                           "Run:  python build_cpp.py build_ext --inplace")
+    if backend == 'numba' and not NUMBA_AVAILABLE:
+        raise RuntimeError("backend='numba' requested but numba is not installed. "
+                           "Install with: pip install pyMoM3d[numba]")
+
+    use_numba = (backend == 'numba')
+    use_cpp   = (backend == 'cpp')
+
     N = rwg_basis.num_basis
     Z = np.zeros((N, N), dtype=np.complex128)
 
     prefactor_A = 1j * k * eta
     prefactor_Phi = -1j * eta / k
 
+    # --- Precompute per-triangle geometry (vectorized, done once) ---
+    tri_verts = mesh.vertices[mesh.triangles]          # (N_t, 3, 3)
+    tri_centroids = tri_verts.mean(axis=1)             # (N_t, 3)
+    e0 = tri_verts[:, 1] - tri_verts[:, 0]            # (N_t, 3)
+    e1 = tri_verts[:, 2] - tri_verts[:, 1]
+    e2 = tri_verts[:, 0] - tri_verts[:, 2]
+    tri_mean_edge = (
+        np.linalg.norm(e0, axis=1) +
+        np.linalg.norm(e1, axis=1) +
+        np.linalg.norm(e2, axis=1)
+    ) / 3.0                                            # (N_t,)
+    tri_twice_area = 2.0 * mesh.triangle_areas         # (N_t,)
+
+    # Quadrature rule — computed once, shared across all pairs
+    weights, bary = triangle_quad_rule(quad_order)
+
+    # --- C++ backend: pass flat arrays, GIL released inside C++ ---
+    if use_cpp:
+        _fill_impedance_cpp(
+            Z,
+            mesh.vertices.astype(np.float64, copy=False),
+            mesh.triangles.astype(np.int32, copy=False),
+            rwg_basis.t_plus.astype(np.int32, copy=False),
+            rwg_basis.t_minus.astype(np.int32, copy=False),
+            rwg_basis.free_vertex_plus.astype(np.int32, copy=False),
+            rwg_basis.free_vertex_minus.astype(np.int32, copy=False),
+            rwg_basis.area_plus.astype(np.float64, copy=False),
+            rwg_basis.area_minus.astype(np.float64, copy=False),
+            rwg_basis.edge_length.astype(np.float64, copy=False),
+            np.ascontiguousarray(tri_centroids, dtype=np.float64),
+            np.ascontiguousarray(tri_mean_edge, dtype=np.float64),
+            np.ascontiguousarray(tri_twice_area, dtype=np.float64),
+            weights,
+            bary,
+            float(k),
+            float(eta),
+            float(near_threshold),
+            int(quad_order),
+            0,  # num_threads: 0 = use OMP_NUM_THREADS / hardware default
+        )
+        return Z
+
+    # --- Numba backend: pass flat arrays, no Python loop ---
+    if use_numba:
+        fill_Z_numba(
+            Z,
+            mesh.vertices.astype(np.float64, copy=False),
+            mesh.triangles.astype(np.int32, copy=False),
+            rwg_basis.t_plus.astype(np.int32, copy=False),
+            rwg_basis.t_minus.astype(np.int32, copy=False),
+            rwg_basis.free_vertex_plus.astype(np.int32, copy=False),
+            rwg_basis.free_vertex_minus.astype(np.int32, copy=False),
+            rwg_basis.area_plus.astype(np.float64, copy=False),
+            rwg_basis.area_minus.astype(np.float64, copy=False),
+            rwg_basis.edge_length.astype(np.float64, copy=False),
+            np.ascontiguousarray(tri_centroids, dtype=np.float64),
+            np.ascontiguousarray(tri_mean_edge, dtype=np.float64),
+            np.ascontiguousarray(tri_twice_area, dtype=np.float64),
+            weights,
+            bary,
+            float(k),
+            float(eta),
+            float(near_threshold),
+            int(quad_order),
+        )
+        return Z
+
+    near_thresh_scaled = near_threshold * 3.0
+
     total_pairs = N * (N + 1) // 2
     for m in range(N):
         if progress_callback is not None:
             done = m * (2 * N - m - 1) // 2
             progress_callback(done / total_pairs if total_pairs > 0 else 0.0)
+
+        tris_m = (
+            (rwg_basis.t_plus[m],  rwg_basis.free_vertex_plus[m],  +1.0, rwg_basis.area_plus[m]),
+            (rwg_basis.t_minus[m], rwg_basis.free_vertex_minus[m], -1.0, rwg_basis.area_minus[m]),
+        )
+
         for n in range(m, N):
             I_A_total = 0.0 + 0.0j
             I_Phi_total = 0.0 + 0.0j
 
-            for (tri_m, fv_m, sign_m, A_m) in [
-                (rwg_basis.t_plus[m], rwg_basis.free_vertex_plus[m], +1.0, rwg_basis.area_plus[m]),
-                (rwg_basis.t_minus[m], rwg_basis.free_vertex_minus[m], -1.0, rwg_basis.area_minus[m]),
-            ]:
-                for (tri_n, fv_n, sign_n, A_n) in [
-                    (rwg_basis.t_plus[n], rwg_basis.free_vertex_plus[n], +1.0, rwg_basis.area_plus[n]),
-                    (rwg_basis.t_minus[n], rwg_basis.free_vertex_minus[n], -1.0, rwg_basis.area_minus[n]),
-                ]:
+            tris_n = (
+                (rwg_basis.t_plus[n],  rwg_basis.free_vertex_plus[n],  +1.0, rwg_basis.area_plus[n]),
+                (rwg_basis.t_minus[n], rwg_basis.free_vertex_minus[n], -1.0, rwg_basis.area_minus[n]),
+            )
+
+            for (tri_m, fv_m, sign_m, A_m) in tris_m:
+                centroid_m = tri_centroids[tri_m]
+                for (tri_n, fv_n, sign_n, A_n) in tris_n:
+                    mean_edge_n = tri_mean_edge[tri_n]
+                    dist = np.linalg.norm(centroid_m - tri_centroids[tri_n])
+                    is_near = (dist < near_thresh_scaled * mean_edge_n
+                               if mean_edge_n > 1e-30 else True)
+
                     I_A, I_Phi = _compute_triangle_pair(
                         k, mesh, tri_m, tri_n, fv_m, fv_n,
                         sign_m, sign_n,
                         rwg_basis.edge_length[m], rwg_basis.edge_length[n],
                         A_m, A_n,
                         quad_order, near_threshold,
+                        weights, bary,
+                        tri_twice_area[tri_m], tri_twice_area[tri_n],
+                        is_near,
                     )
                     I_A_total += I_A
                     I_Phi_total += I_Phi

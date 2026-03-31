@@ -86,6 +86,67 @@ class PlaneWaveExcitation(Excitation):
         return V
 
 
+    def compute_mfie_voltage_vector(
+        self, rwg_basis: RWGBasis, mesh: Mesh, k: float, eta: float
+    ) -> np.ndarray:
+        """Compute the MFIE RHS vector for a plane wave excitation.
+
+        V_m^MFIE = ∑_{T ∈ {T_m+, T_m-}}
+                   ∫_T f_m(r) · [n̂_T × H_inc(r)] dS
+
+        where H_inc = (k̂ × E_0) * exp(−jk · r) / η.
+
+        Parameters
+        ----------
+        rwg_basis : RWGBasis
+        mesh : Mesh
+        k : float
+            Wavenumber (rad/m).
+        eta : float
+            Intrinsic impedance of the medium (Ω).
+
+        Returns
+        -------
+        V : ndarray, shape (N,), complex128
+        """
+        N = rwg_basis.num_basis
+        V = np.zeros(N, dtype=np.complex128)
+
+        # H_inc(r) = (k̂ × E_0) * exp(−jk*k̂·r) / η
+        H_amp = np.cross(self.k_hat, self.E0) / eta  # (3,) complex
+
+        weights, bary = triangle_quad_rule(4)
+
+        for n in range(N):
+            for (tri, fv, sign, area) in [
+                (rwg_basis.t_plus[n],  rwg_basis.free_vertex_plus[n],
+                 +1.0, rwg_basis.area_plus[n]),
+                (rwg_basis.t_minus[n], rwg_basis.free_vertex_minus[n],
+                 -1.0, rwg_basis.area_minus[n]),
+            ]:
+                verts = mesh.vertices[mesh.triangles[tri]]
+                r_fv  = mesh.vertices[fv]
+
+                cross = np.cross(verts[1] - verts[0], verts[2] - verts[0])
+                twice_area = np.linalg.norm(cross)
+                n_hat = cross / (twice_area if twice_area > 1e-30 else 1.0)
+
+                scale = sign * rwg_basis.edge_length[n] / (2.0 * area)
+
+                for i in range(len(weights)):
+                    r = (bary[i, 0] * verts[0]
+                         + bary[i, 1] * verts[1]
+                         + bary[i, 2] * verts[2])
+                    rho   = r - r_fv
+                    H_inc = H_amp * np.exp(-1j * k * np.dot(self.k_hat, r))
+                    # f_m · (n̂ × H_inc) = (f_m × n̂) · H_inc  [scalar triple product]
+                    # equivalently: rho_scaled · (n̂ × H_inc)
+                    nxH = np.cross(n_hat, H_inc)
+                    V[n] += weights[i] * np.dot(rho, nxH) * scale * twice_area
+
+        return V
+
+
 class DeltaGapExcitation(Excitation):
     """Delta-gap voltage source at a specified edge.
 

@@ -44,6 +44,8 @@ from .mom import (
     solve_direct,
     solve_gmres,
 )
+from .mom.assembly import fill_matrix
+from .mom.operators import EFIEOperator, MFIEOperator, CFIEOperator
 from .mom.excitation import (
     StripDeltaGapExcitation, find_feed_edges,
     MultiPortExcitation, find_feed_edges_near_center,
@@ -82,7 +84,8 @@ __all__ = [
     # Constants
     'c0', 'mu0', 'eps0', 'eta0',
     # MoM
-    'fill_impedance_matrix',
+    'fill_impedance_matrix', 'fill_matrix',
+    'EFIEOperator', 'MFIEOperator', 'CFIEOperator',
     'PlaneWaveExcitation', 'DeltaGapExcitation', 'StripDeltaGapExcitation', 'find_feed_edges',
     'MultiPortExcitation', 'find_feed_edges_near_center',
     'solve_direct', 'solve_gmres',

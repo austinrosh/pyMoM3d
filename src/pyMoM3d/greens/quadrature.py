@@ -14,6 +14,8 @@ References
 import numpy as np
 from typing import Tuple
 
+_QUAD_CACHE: dict = {}
+
 
 def triangle_quad_rule(order: int) -> Tuple[np.ndarray, np.ndarray]:
     """Return symmetric Gauss quadrature rule on a triangle.
@@ -30,6 +32,9 @@ def triangle_quad_rule(order: int) -> Tuple[np.ndarray, np.ndarray]:
     bary : ndarray, shape (N, 3)
         Barycentric coordinates (L1, L2, L3) per point.
     """
+    if order in _QUAD_CACHE:
+        return _QUAD_CACHE[order]
+
     if order == 1:
         # Centroid rule — exact for degree 1
         w = np.array([0.5])
@@ -124,7 +129,9 @@ def triangle_quad_rule(order: int) -> Tuple[np.ndarray, np.ndarray]:
     else:
         raise ValueError(f"Unsupported quadrature order {order}. Use 1, 3, 4, 7, or 13.")
 
-    return w.astype(np.float64), b.astype(np.float64)
+    result = w.astype(np.float64), b.astype(np.float64)
+    _QUAD_CACHE[order] = result
+    return result
 
 
 def integrate_over_triangle(

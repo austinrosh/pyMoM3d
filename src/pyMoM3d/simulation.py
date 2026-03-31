@@ -17,6 +17,8 @@ from .mesh.rwg_basis import RWGBasis
 from .mesh.rwg_connectivity import compute_rwg_connectivity
 from .mesh.trimesh_mesher import PythonMesher
 from .mom.impedance import fill_impedance_matrix
+from .mom.assembly import fill_matrix
+from .mom.operators import EFIEOperator, MFIEOperator, CFIEOperator
 from .mom.excitation import Excitation, PlaneWaveExcitation
 from .mom.solver import solve_direct, solve_gmres
 from .fields.far_field import compute_far_field
@@ -50,6 +52,9 @@ class SimulationConfig:
     solver_type: str = 'direct'
     quad_order: int = 4
     near_threshold: float = 0.2
+    formulation: str = 'EFIE'
+    cfie_alpha: float = 0.5
+    backend: str = 'auto'
     enable_report: bool = False
     report_dir: str = 'results/simulation_info'
 
@@ -309,7 +314,8 @@ class Simulation:
             )
 
         # --- Z-fill ---
-        total_pairs = N * (N + 1) // 2
+        _symmetric_formulation = self.config.formulation.upper() == 'EFIE'
+        total_pairs = N * (N + 1) // 2 if _symmetric_formulation else N * N
         self.reporter.stage_start(
             "z_fill", N=N, total_pairs=total_pairs,
             quad_order=self.config.quad_order,
@@ -319,10 +325,24 @@ class Simulation:
             self.reporter.stage_progress("z_fill", fraction, row=int(fraction * N), N=N)
 
         try:
-            Z = fill_impedance_matrix(
-                self.basis, self.mesh, k, eta0,
+            formulation = self.config.formulation.upper()
+            if formulation == 'EFIE':
+                operator = EFIEOperator()
+            elif formulation == 'MFIE':
+                operator = MFIEOperator()
+            elif formulation == 'CFIE':
+                operator = CFIEOperator(alpha=self.config.cfie_alpha)
+            else:
+                raise ValueError(
+                    f"Unknown formulation '{self.config.formulation}'. "
+                    "Choose 'EFIE', 'MFIE', or 'CFIE'."
+                )
+
+            Z = fill_matrix(
+                operator, self.basis, self.mesh, k, eta0,
                 quad_order=self.config.quad_order,
                 near_threshold=self.config.near_threshold,
+                backend=self.config.backend,
                 progress_callback=_z_progress,
             )
         except Exception:
@@ -339,7 +359,17 @@ class Simulation:
         self.reporter.stage_end("z_fill", N=N)
 
         # --- Excitation ---
-        V = self.config.excitation.compute_voltage_vector(self.basis, self.mesh, k)
+        formulation = self.config.formulation.upper()
+        exc = self.config.excitation
+        if formulation == 'CFIE' and isinstance(exc, PlaneWaveExcitation):
+            V_efie = exc.compute_voltage_vector(self.basis, self.mesh, k)
+            V_mfie = exc.compute_mfie_voltage_vector(self.basis, self.mesh, k, eta0)
+            alpha = self.config.cfie_alpha
+            V = alpha * V_efie + (1.0 - alpha) * eta0 * V_mfie
+        elif formulation == 'MFIE' and isinstance(exc, PlaneWaveExcitation):
+            V = exc.compute_mfie_voltage_vector(self.basis, self.mesh, k, eta0)
+        else:
+            V = exc.compute_voltage_vector(self.basis, self.mesh, k)
 
         # --- Solve ---
         cond = float(np.linalg.cond(Z))
