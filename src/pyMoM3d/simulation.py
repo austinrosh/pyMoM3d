@@ -15,7 +15,6 @@ from typing import List, Optional
 from .mesh.mesh_data import Mesh
 from .mesh.rwg_basis import RWGBasis
 from .mesh.rwg_connectivity import compute_rwg_connectivity
-from .mesh.trimesh_mesher import PythonMesher
 from .mom.impedance import fill_impedance_matrix
 from .mom.assembly import fill_matrix
 from .mom.operators import EFIEOperator, MFIEOperator, CFIEOperator
@@ -113,12 +112,10 @@ class Simulation:
         Geometry primitive (RectangularPlate, Sphere, etc.).
     mesh : Mesh, optional
         Pre-built mesh. If None, mesh is generated from geometry.
-    subdivisions : int
-        Subdivision level for trimesh mesh generation.
     mesher : str
-        Mesher backend: 'trimesh' (default) or 'gmsh'.
+        Mesher backend.  Only 'gmsh' is supported.
     target_edge_length : float, optional
-        Target edge length in meters (used with mesher='gmsh').
+        Target edge length in meters for GmshMesher.
     reporter : object, optional
         Progress reporter. Defaults to ``TerminalReporter``.
         Pass ``SilentReporter()`` to suppress output.
@@ -129,14 +126,12 @@ class Simulation:
         config: SimulationConfig,
         geometry=None,
         mesh: Mesh = None,
-        subdivisions: int = 2,
-        mesher: str = 'trimesh',
+        mesher: str = 'gmsh',
         target_edge_length: Optional[float] = None,
         reporter=None,
     ):
         self.config = config
         self.geometry = geometry
-        self.subdivisions = subdivisions
         self._start_time = _time.monotonic()
 
         inner_reporter = reporter if reporter is not None else TerminalReporter()
@@ -176,14 +171,9 @@ class Simulation:
             geom_type = type(geometry).__name__
             self.reporter.stage_start("mesh", geometry_type=geom_type)
             try:
-                if mesher == 'gmsh':
-                    from .mesh.gmsh_mesher import GmshMesher
-                    gmsh_mesher = GmshMesher(target_edge_length=target_edge_length)
-                    self.mesh = gmsh_mesher.mesh_from_geometry(geometry)
-                else:
-                    trimesh_mesher = PythonMesher()
-                    trimesh_obj = geometry.to_trimesh(subdivisions=subdivisions)
-                    self.mesh = trimesh_mesher.mesh_from_geometry(trimesh_obj)
+                from .mesh.gmsh_mesher import GmshMesher
+                gmsh_mesher = GmshMesher(target_edge_length=target_edge_length)
+                self.mesh = gmsh_mesher.mesh_from_geometry(geometry)
             except Exception:
                 self.reporter.error("Mesh generation failed")
                 raise
@@ -418,47 +408,17 @@ class Simulation:
         )
 
 
-def _load_trimesh(path: str):
-    """Load an STL or OBJ file and return a single trimesh.Trimesh.
-
-    OBJ files with multiple material groups or objects are returned as
-    a ``trimesh.Scene`` by ``trimesh.load()``.  This helper collapses
-    the scene into one ``Trimesh`` via concatenation so downstream code
-    always receives a single mesh.
-    """
-    import trimesh as _trimesh
-
-    loaded = _trimesh.load(path)
-    if isinstance(loaded, _trimesh.Trimesh):
-        return loaded
-    if isinstance(loaded, _trimesh.Scene):
-        meshes = [g for g in loaded.geometry.values()
-                  if isinstance(g, _trimesh.Trimesh)]
-        if not meshes:
-            raise ValueError(f"No triangle meshes found in {path}")
-        return _trimesh.util.concatenate(meshes)
-    raise TypeError(
-        f"Unexpected type from trimesh.load(): {type(loaded).__name__}"
-    )
-
-
-def load_stl(path: str, mesher: str = 'trimesh') -> Mesh:
-    """Load a mesh from an STL or OBJ file.
+def load_stl(path: str) -> Mesh:
+    """Load a mesh from an STL or OBJ file via GmshMesher.
 
     Parameters
     ----------
     path : str
         Path to .stl or .obj file.
-    mesher : str
-        Mesher backend: 'trimesh' (default) or 'gmsh'.
 
     Returns
     -------
     mesh : Mesh
     """
-    if mesher == 'gmsh':
-        from .mesh.gmsh_mesher import GmshMesher
-        return GmshMesher().mesh_from_file(path)
-    trimesh_obj = _load_trimesh(path)
-    m = PythonMesher()
-    return m.mesh_from_geometry(trimesh_obj)
+    from .mesh.gmsh_mesher import GmshMesher
+    return GmshMesher().mesh_from_file(path)

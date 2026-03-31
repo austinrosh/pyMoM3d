@@ -19,7 +19,6 @@ import matplotlib.pyplot as plt
 
 from pyMoM3d import (
     GmshMesher,
-    PythonMesher,
     compute_rwg_connectivity,
     compute_far_field,
     compute_rcs,
@@ -38,7 +37,7 @@ configure_latex_style()
 
 
 def load_mesh_from_file(path):
-    """Load a mesh file via trimesh, preserving original triangulation.
+    """Load a mesh file via GmshMesher.
 
     Parameters
     ----------
@@ -49,10 +48,7 @@ def load_mesh_from_file(path):
     -------
     mesh : Mesh
     """
-    from pyMoM3d.simulation import _load_trimesh
-    trimesh_obj = _load_trimesh(path)
-    mesher = PythonMesher()
-    return mesher.mesh_from_geometry(trimesh_obj)
+    return GmshMesher().mesh_from_file(path)
 
 
 def assess_mesh_quality(stats, validation, wavelength, required_epw=10):

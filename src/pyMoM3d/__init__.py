@@ -6,8 +6,6 @@ from .mesh import (
     RWGBasis,
     create_mesh_from_vertices,
     create_rectangular_mesh,
-    PythonMesher,
-    create_mesh_from_trimesh,
     GmshMesher,
     compute_rwg_connectivity,
 )
@@ -61,6 +59,7 @@ from .arrays import (
     scan_angle_to_phase_shift,
 )
 from .simulation import Simulation, SimulationConfig, SimulationResult, load_stl
+from .network import Port, NetworkResult, NetworkExtractor
 __version__ = '0.2.0'
 
 __all__ = [
@@ -69,7 +68,7 @@ __all__ = [
     # Mesh
     'Mesh', 'RWGBasis',
     'create_mesh_from_vertices', 'create_rectangular_mesh',
-    'PythonMesher', 'create_mesh_from_trimesh', 'GmshMesher', 'compute_rwg_connectivity',
+    'GmshMesher', 'compute_rwg_connectivity',
     # Visualization
     'plot_mesh', 'plot_mesh_3d', 'plot_surface_current', 'compute_triangle_current_density',
     'plot_surface_current_vectors', 'compute_triangle_current_vectors',
@@ -97,6 +96,8 @@ __all__ = [
     'arbitrary_excitation', 'scan_angle_to_phase_shift',
     # Simulation
     'Simulation', 'SimulationConfig', 'SimulationResult', 'load_stl',
+    # Network extraction
+    'Port', 'NetworkResult', 'NetworkExtractor',
     # Reporter
     'TerminalReporter', 'SilentReporter', 'RecordingReporter',
 ]

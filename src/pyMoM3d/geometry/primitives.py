@@ -1,8 +1,7 @@
 """Programmatic geometry generation primitives."""
 
 import numpy as np
-import trimesh
-from typing import Tuple, Optional
+from typing import Tuple
 
 
 class RectangularPlate:
@@ -111,55 +110,6 @@ class RectangularPlate:
         
         return vertices.astype(np.float64)
     
-    def to_trimesh(self, subdivisions: Optional[int] = None) -> trimesh.Trimesh:
-        """
-        Create a trimesh object for the plate.
-        
-        Parameters
-        ----------
-        subdivisions : int, optional
-            Number of subdivisions along each axis. If None, creates a simple
-            quad mesh. If specified, creates a refined mesh.
-        
-        Returns
-        -------
-        mesh : trimesh.Trimesh
-            Trimesh object representing the plate
-        """
-        if subdivisions is None:
-            # Create a simple rectangular plate with two triangles
-            w = self.width / 2.0
-            h = self.height / 2.0
-            
-            # Define rectangle vertices (counter-clockwise when viewed from +z)
-            vertices = np.array([
-                [-w, -h, 0.0],
-                [ w, -h, 0.0],
-                [ w,  h, 0.0],
-                [-w,  h, 0.0]
-            ], dtype=np.float64)
-            
-            # Create two triangles
-            faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
-            mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-        else:
-            # Create refined mesh using grid triangulation
-            vertices = self.get_vertex_grid(subdivisions, subdivisions)
-            nx = ny = subdivisions
-            faces = []
-            for i in range(ny - 1):
-                for j in range(nx - 1):
-                    # Two triangles per quad
-                    idx = i * nx + j
-                    faces.append([idx, idx + 1, idx + nx])
-                    faces.append([idx + 1, idx + nx + 1, idx + nx])
-            faces = np.array(faces, dtype=np.int32)
-            mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-        
-        # Translate to center
-        mesh.apply_translation(self.center)
-        
-        return mesh
 
 
 class Sphere:
@@ -219,24 +169,6 @@ class Sphere:
         max_corner = self.center + np.array([r, r, r])
         return min_corner, max_corner
     
-    def to_trimesh(self, subdivisions: int = 2) -> trimesh.Trimesh:
-        """
-        Create a trimesh sphere object.
-        
-        Parameters
-        ----------
-        subdivisions : int, default 2
-            Number of subdivisions for icosphere generation
-        
-        Returns
-        -------
-        mesh : trimesh.Trimesh
-            Trimesh sphere object
-        """
-        # Use trimesh's icosphere for high-quality sphere mesh
-        mesh = trimesh.creation.icosphere(subdivisions=subdivisions, radius=self.radius)
-        mesh.apply_translation(self.center)
-        return mesh
 
 
 class Cylinder:
@@ -298,33 +230,6 @@ class Cylinder:
         max_corner = self.center + np.array([r, r, h])
         return min_corner, max_corner
     
-    def to_trimesh(self, sections: int = 32) -> trimesh.Trimesh:
-        """
-        Create a trimesh cylinder object.
-        
-        Parameters
-        ----------
-        sections : int, default 32
-            Number of sections around the cylinder
-        
-        Returns
-        -------
-        mesh : trimesh.Trimesh
-            Trimesh cylinder object (surface only, no caps)
-        """
-        # Create cylinder using trimesh
-        # Note: trimesh.creation.cylinder creates a solid, we want just the surface
-        # We'll create it manually or use a workaround
-        mesh = trimesh.creation.cylinder(
-            radius=self.radius,
-            height=self.height,
-            sections=sections
-        )
-        
-        # Extract just the lateral surface (remove caps)
-        # For now, keep the full mesh - we can refine later if needed
-        mesh.apply_translation(self.center)
-        return mesh
 
 
 class Cube:
@@ -433,8 +338,6 @@ class Cube:
         # Combine all faces
         vertices = np.vstack(vertices_list)
         
-        # Note: Duplicate vertices at edges will be handled by trimesh mesher
-        
         # Translate to center
         vertices = vertices + self.center
         
@@ -447,19 +350,6 @@ class Cube:
         max_corner = self.center + s
         return min_corner, max_corner
     
-    def to_trimesh(self) -> trimesh.Trimesh:
-        """
-        Create a trimesh cube object.
-        
-        Returns
-        -------
-        mesh : trimesh.Trimesh
-            Trimesh cube object
-        """
-        # Use trimesh's box creation
-        mesh = trimesh.creation.box(extents=[self.side_length] * 3)
-        mesh.apply_translation(self.center)
-        return mesh
 
 
 class Pyramid:
@@ -582,45 +472,3 @@ class Pyramid:
         max_corner = self.center + np.array([s, s, self.height])
         return min_corner, max_corner
     
-    def to_trimesh(self) -> trimesh.Trimesh:
-        """
-        Create a trimesh pyramid object.
-        
-        Returns
-        -------
-        mesh : trimesh.Trimesh
-            Trimesh pyramid object
-        """
-        # Create pyramid manually
-        s = self.base_size / 2.0
-        h = self.height
-        
-        # Base vertices
-        base_vertices = np.array([
-            [-s, -s, 0.0],
-            [ s, -s, 0.0],
-            [ s,  s, 0.0],
-            [-s,  s, 0.0]
-        ])
-        
-        # Apex
-        apex = np.array([0.0, 0.0, h])
-        
-        # Combine vertices
-        vertices = np.vstack([base_vertices, apex])
-        
-        # Define faces: base (1 quad = 2 triangles) + 4 triangular sides
-        faces = np.array([
-            # Base (two triangles)
-            [0, 1, 2],
-            [0, 2, 3],
-            # Four triangular sides
-            [0, 1, 4],  # front
-            [1, 2, 4],  # right
-            [2, 3, 4],  # back
-            [3, 0, 4]   # left
-        ], dtype=np.int32)
-        
-        mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-        mesh.apply_translation(self.center)
-        return mesh

@@ -110,11 +110,9 @@ class TestClosedSphere:
 
     @pytest.fixture
     def sphere_mesh(self):
-        from pyMoM3d import Sphere, PythonMesher
+        from pyMoM3d import Sphere, GmshMesher
         sphere = Sphere(radius=1.0)
-        trimesh_obj = sphere.to_trimesh(subdivisions=2)
-        mesher = PythonMesher()
-        mesh = mesher.mesh_from_geometry(trimesh_obj)
+        mesh = GmshMesher(target_edge_length=0.5).mesh_from_geometry(sphere)
         return mesh
 
     def test_zero_boundary_edges(self, sphere_mesh):

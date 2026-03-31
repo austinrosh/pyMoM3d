@@ -15,8 +15,9 @@ def test_mesh_creation():
     """Test basic mesh creation."""
     plate = RectangularPlate(1.0, 0.5)
     vertices = plate.get_vertices()
-    mesh = create_mesh_from_vertices(vertices)
-    
+    triangles = np.array([[0, 1, 2], [0, 2, 3]])
+    mesh = create_mesh_from_vertices(vertices, triangles=triangles)
+
     assert mesh.get_num_vertices() == 4
     assert mesh.get_num_triangles() == 2
     assert mesh.get_num_edges() == 5  # 4 boundary + 1 interior (diagonal)
@@ -26,7 +27,8 @@ def test_mesh_properties():
     """Test that mesh computes all required properties."""
     plate = RectangularPlate(1.0, 1.0)
     vertices = plate.get_vertices()
-    mesh = create_mesh_from_vertices(vertices)
+    triangles = np.array([[0, 1, 2], [0, 2, 3]])
+    mesh = create_mesh_from_vertices(vertices, triangles=triangles)
     
     # Check that all properties are computed
     assert mesh.triangle_normals.shape == (mesh.get_num_triangles(), 3)
@@ -49,34 +51,29 @@ def test_rwg_connectivity():
     """Test RWG connectivity computation."""
     plate = RectangularPlate(1.0, 0.5)
     vertices = plate.get_vertices()
-    mesh = create_mesh_from_vertices(vertices)
-    rwg_pairs = compute_rwg_connectivity(mesh)
-    
-    assert rwg_pairs.shape[1] == 2  # Each pair has 2 triangle indices
-    assert len(rwg_pairs) == mesh.get_num_edges()
-    
-    # Check that boundary edges have -1 as second index
-    boundary_edges = rwg_pairs[:, 1] == -1
-    interior_edges = rwg_pairs[:, 1] != -1
-    
-    # For a rectangular plate with 2 triangles, we should have:
-    # - 4 boundary edges (one per side)
-    # - 1 interior edge (the diagonal)
-    assert np.sum(boundary_edges) == 4
-    assert np.sum(interior_edges) == 1
-    
-    # Check that interior edge connects the two triangles
-    interior_pair = rwg_pairs[interior_edges][0]
-    assert interior_pair[0] in [0, 1]
-    assert interior_pair[1] in [0, 1]
-    assert interior_pair[0] != interior_pair[1]
+    triangles = np.array([[0, 1, 2], [0, 2, 3]])
+    mesh = create_mesh_from_vertices(vertices, triangles=triangles)
+    basis = compute_rwg_connectivity(mesh)
+
+    # compute_rwg_connectivity returns an RWGBasis, not an ndarray
+    # For a 2-triangle plate with 1 interior edge:
+    # - 1 RWG basis function (interior edge)
+    # - 4 boundary edges
+    assert basis.num_basis == 1
+    assert basis.num_boundary_edges == 4
+
+    # Interior edge connects the two triangles (t_plus and t_minus are 0 and 1)
+    assert basis.t_plus[0] in [0, 1]
+    assert basis.t_minus[0] in [0, 1]
+    assert basis.t_plus[0] != basis.t_minus[0]
 
 
 def test_mesh_statistics():
     """Test mesh statistics computation."""
     plate = RectangularPlate(1.0, 0.5)
     vertices = plate.get_vertices()
-    mesh = create_mesh_from_vertices(vertices)
+    triangles = np.array([[0, 1, 2], [0, 2, 3]])
+    mesh = create_mesh_from_vertices(vertices, triangles=triangles)
     
     stats = mesh.get_statistics()
     

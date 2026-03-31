@@ -377,21 +377,3 @@ class Mesh:
         
         return results
     
-    @classmethod
-    def from_trimesh(cls, trimesh_obj) -> 'Mesh':
-        """
-        Create a Mesh object from a trimesh.Trimesh object.
-        
-        Parameters
-        ----------
-        trimesh_obj : trimesh.Trimesh
-            Trimesh object to convert
-        
-        Returns
-        -------
-        mesh : Mesh
-            Mesh object with vertices and triangles from trimesh
-        """
-        vertices = np.asarray(trimesh_obj.vertices, dtype=np.float64)
-        triangles = np.asarray(trimesh_obj.faces, dtype=np.int32)
-        return cls(vertices, triangles)
