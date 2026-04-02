@@ -11,6 +11,7 @@ __pycache__/
 
 dist/
 build/
+ai/
 
 # -------------------------
 # Virtual environments
@@ -59,3 +60,4 @@ docs/plans/
 docs/theory
 docs/tutorial/api-reference.md
 docs/tutorial/architecture.md
+strata/

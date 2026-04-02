@@ -60,6 +60,10 @@ from .arrays import (
 )
 from .simulation import Simulation, SimulationConfig, SimulationResult, load_stl
 from .network import Port, NetworkResult, NetworkExtractor
+from .medium import Layer, LayerStack
+from .greens.layered import LayeredGreensFunction
+from .greens.free_space_gf import FreeSpaceGreensFunction
+from .mom.operators.efie_layered import MultilayerEFIEOperator
 __version__ = '0.2.0'
 
 __all__ = [
@@ -98,6 +102,9 @@ __all__ = [
     'Simulation', 'SimulationConfig', 'SimulationResult', 'load_stl',
     # Network extraction
     'Port', 'NetworkResult', 'NetworkExtractor',
+    # Multilayer
+    'Layer', 'LayerStack', 'LayeredGreensFunction',
+    'FreeSpaceGreensFunction', 'MultilayerEFIEOperator',
     # Reporter
     'TerminalReporter', 'SilentReporter', 'RecordingReporter',
 ]

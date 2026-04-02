@@ -56,6 +56,7 @@ class SimulationConfig:
     backend: str = 'auto'
     enable_report: bool = False
     report_dir: str = 'results/simulation_info'
+    layer_stack: Optional['LayerStack'] = None
 
 
 @dataclass
@@ -287,7 +288,18 @@ class Simulation:
         write_report(md, path)
 
     def _solve_at_frequency(self, frequency: float) -> SimulationResult:
-        k = 2.0 * np.pi * frequency / c0
+        # Wavenumber and impedance: use source layer if layer_stack is set
+        if self.config.layer_stack is not None:
+            from .greens.layered import LayeredGreensFunction
+            _gf = LayeredGreensFunction(
+                self.config.layer_stack, frequency,
+                backend=self.config.backend if self.config.backend != 'auto' else 'auto',
+            )
+            k   = complex(_gf.wavenumber)
+            eta = complex(_gf.wave_impedance)
+        else:
+            k   = 2.0 * np.pi * frequency / c0
+            eta = eta0
         N = self.basis.num_basis
 
         logger.info(f"Solving at f={frequency:.4g} Hz (k={k:.4g} rad/m), "
@@ -316,7 +328,15 @@ class Simulation:
 
         try:
             formulation = self.config.formulation.upper()
-            if formulation == 'EFIE':
+            if self.config.layer_stack is not None and formulation == 'EFIE':
+                from .greens.layered import LayeredGreensFunction
+                from .mom.operators.efie_layered import MultilayerEFIEOperator
+                _gf_op = LayeredGreensFunction(
+                    self.config.layer_stack, frequency,
+                    backend=self.config.backend if self.config.backend != 'auto' else 'auto',
+                )
+                operator = MultilayerEFIEOperator(_gf_op)
+            elif formulation == 'EFIE':
                 operator = EFIEOperator()
             elif formulation == 'MFIE':
                 operator = MFIEOperator()
@@ -329,7 +349,7 @@ class Simulation:
                 )
 
             Z = fill_matrix(
-                operator, self.basis, self.mesh, k, eta0,
+                operator, self.basis, self.mesh, k, eta,
                 quad_order=self.config.quad_order,
                 near_threshold=self.config.near_threshold,
                 backend=self.config.backend,

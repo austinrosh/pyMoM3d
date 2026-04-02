@@ -155,11 +155,17 @@ class NetworkExtractor:
 
         results = []
         for freq in frequencies:
-            k   = 2.0 * np.pi * freq / c0
-            eta = eta0
+            if self.sim.config.layer_stack is not None:
+                from ..greens.layered import LayeredGreensFunction
+                _gf = LayeredGreensFunction(self.sim.config.layer_stack, freq)
+                k   = complex(_gf.wavenumber)
+                eta = complex(_gf.wave_impedance)
+            else:
+                k   = 2.0 * np.pi * freq / c0
+                eta = eta0
 
             # 1. Assemble Z_sys — one fill per frequency
-            op = self._make_operator()
+            op = self._make_operator(freq)
             Z_sys = fill_matrix(
                 op,
                 self.sim.basis,
@@ -207,7 +213,7 @@ class NetworkExtractor:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _make_operator(self):
+    def _make_operator(self, frequency: float = None):
         """Return the appropriate impedance operator from the Simulation config."""
         from ..mom.operators import EFIEOperator, MFIEOperator, CFIEOperator
         f = self.sim.config.formulation
@@ -215,6 +221,11 @@ class NetworkExtractor:
             return MFIEOperator()
         if f == 'CFIE':
             return CFIEOperator(alpha=self.sim.config.cfie_alpha)
+        if self.sim.config.layer_stack is not None and frequency is not None:
+            from ..greens.layered import LayeredGreensFunction
+            from ..mom.operators.efie_layered import MultilayerEFIEOperator
+            gf = LayeredGreensFunction(self.sim.config.layer_stack, frequency)
+            return MultilayerEFIEOperator(gf)
         return EFIEOperator()
 
     def _solve(self, Z_sys: np.ndarray, V_all: np.ndarray) -> np.ndarray:

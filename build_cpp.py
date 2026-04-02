@@ -12,6 +12,19 @@ resulting shared library at::
 
 The extension is then importable as ``pyMoM3d.mom._cpp_kernels``.
 
+Strata backend (optional)
+--------------------------
+To also build the Strata multilayer Green's function wrapper, first install
+the Strata C++ library (https://github.com/modelics/strata), then pass its
+installation prefix::
+
+    venv/bin/python build_cpp.py build_ext --inplace --with-strata=/usr/local
+
+This compiles ``src/cpp/strata_kernels.cpp`` against the installed ``libstrata``
+and places the result at::
+
+    src/pyMoM3d/greens/layered/strata_kernels.<platform-tag>.so
+
 OpenMP on macOS
 ---------------
 Apple clang does not support ``-fopenmp`` natively.  libomp from Homebrew
@@ -27,6 +40,7 @@ A ``src/cpp/CMakeLists.txt`` is also provided for users who prefer cmake:
     cmake --build build/cpp -- -j$(nproc)
 """
 
+import argparse
 import subprocess
 import sys
 import os
@@ -34,6 +48,18 @@ import platform
 import numpy as np
 from setuptools import setup
 from pybind11.setup_helpers import Pybind11Extension, build_ext
+
+# ---------------------------------------------------------------------------
+# Parse --with-strata before setuptools sees argv
+# ---------------------------------------------------------------------------
+_parser = argparse.ArgumentParser(add_help=False)
+_parser.add_argument(
+    '--with-strata', metavar='PATH', default=None,
+    help='Path to Strata installation prefix (enables strata_kernels build)'
+)
+_known, _remaining = _parser.parse_known_args()
+sys.argv = [sys.argv[0]] + _remaining
+strata_dir = _known.with_strata
 
 # ---------------------------------------------------------------------------
 # Compiler flags
@@ -111,9 +137,9 @@ else:
     print("[build_cpp] OpenMP NOT available — building single-threaded")
 
 # ---------------------------------------------------------------------------
-# Extension definition
+# Extension: MoM kernel (always built)
 # ---------------------------------------------------------------------------
-ext = Pybind11Extension(
+ext_mom = Pybind11Extension(
     "pyMoM3d.mom._cpp_kernels",
     sources=["src/cpp/mom_kernel.cpp"],
     include_dirs=include_dirs,
@@ -123,11 +149,45 @@ ext = Pybind11Extension(
     cxx_std=17,
 )
 
+ext_modules = [ext_mom]
+
+# ---------------------------------------------------------------------------
+# Extension: Strata GF wrapper (optional — requires --with-strata=PATH)
+# ---------------------------------------------------------------------------
+if strata_dir is not None:
+    # Strata installs headers to <prefix>/inc and library to <prefix>/lib
+    strata_inc = os.path.join(strata_dir, 'inc')
+    strata_lib_dir = os.path.join(strata_dir, 'lib')
+
+    if not os.path.isdir(strata_inc):
+        print(f"[build_cpp] WARNING: Strata include dir not found: {strata_inc}")
+    if not os.path.isdir(strata_lib_dir):
+        print(f"[build_cpp] WARNING: Strata lib dir not found: {strata_lib_dir}")
+
+    strata_compile = list(compile_args)          # inherit -O3, -march=native, OMP
+    strata_link    = list(link_args) + [f"-Wl,-rpath,{strata_lib_dir}"]
+
+    ext_strata = Pybind11Extension(
+        "pyMoM3d.greens.layered.strata_kernels",
+        sources=["src/cpp/strata_kernels.cpp"],
+        include_dirs=[np.get_include(), strata_inc, "src/cpp"],
+        library_dirs=[strata_lib_dir],
+        libraries=["strata"],
+        extra_compile_args=strata_compile,
+        extra_link_args=strata_link,
+        cxx_std=17,
+    )
+    ext_modules.append(ext_strata)
+    print(f"[build_cpp] Strata backend enabled (prefix: {strata_dir})")
+else:
+    print("[build_cpp] Strata backend NOT built  "
+          "(pass --with-strata=/path/to/strata to enable)")
+
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
 setup(
     name="pyMoM3d",
-    ext_modules=[ext],
+    ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext},
 )

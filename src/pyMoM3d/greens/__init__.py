@@ -3,6 +3,8 @@
 from .quadrature import triangle_quad_rule, integrate_over_triangle
 from .free_space import scalar_green
 from .singularity import integrate_green_singular, integrate_rho_green_singular
+from .base import GreensBackend, GreensFunctionBase
+from .free_space_gf import FreeSpaceGreensFunction
 
 __all__ = [
     'triangle_quad_rule',
@@ -10,4 +12,7 @@ __all__ = [
     'scalar_green',
     'integrate_green_singular',
     'integrate_rho_green_singular',
+    'GreensBackend',
+    'GreensFunctionBase',
+    'FreeSpaceGreensFunction',
 ]
