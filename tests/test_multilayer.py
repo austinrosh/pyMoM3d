@@ -1168,21 +1168,24 @@ class TestCppMultilayerFillCrossLayer:
             integrate_rho_green_singular,
         )
 
-        # Two finite layers: A (z=[0,1mm], eps=2) and B (z=[1,2mm], eps=3)
+        # Two separate planar patches in different layers:
+        #   Patch A: z=0.5mm (layer A), Patch B: z=1.5mm (layer B)
+        # Using separate meshes avoids non-manifold edges (box mesh has
+        # edges shared by 3 triangles, which RWG connectivity rejects).
         s = 0.003
         vertices = np.array([
+            # Patch A (layer A, z=0.5mm) — vertices 0..3
             [-s, -s, 0.5e-3], [s, -s, 0.5e-3],
             [s, s, 0.5e-3], [-s, s, 0.5e-3],
+            # Patch B (layer B, z=1.5mm) — vertices 4..7
             [-s, -s, 1.5e-3], [s, -s, 1.5e-3],
             [s, s, 1.5e-3], [-s, s, 1.5e-3],
         ], dtype=np.float64)
         triangles = np.array([
+            # Patch A
             [0, 1, 2], [0, 2, 3],
-            [4, 6, 5], [5, 6, 7],
-            [0, 4, 5], [0, 5, 1],
-            [2, 6, 4], [2, 4, 0],
-            [3, 7, 6], [3, 6, 2],
-            [1, 5, 7], [1, 7, 3],
+            # Patch B
+            [4, 5, 6], [4, 6, 7],
         ], dtype=np.int32)
 
         mesh = Mesh(vertices, triangles)

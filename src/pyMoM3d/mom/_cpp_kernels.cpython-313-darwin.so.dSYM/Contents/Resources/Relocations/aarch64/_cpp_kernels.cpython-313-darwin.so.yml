@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     'src/pyMoM3d/mom/_cpp_kernels.cpython-313-darwin.so'
+relocations:     []
+...

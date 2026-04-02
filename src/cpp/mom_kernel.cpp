@@ -202,9 +202,15 @@ void fill_impedance_cpp(
 #ifdef _OPENMP
     if (num_threads > 0)
         omp_set_num_threads(num_threads);
+#endif
 
-    // Release the GIL — pybind11 already did this before calling us.
-    // Outer parallel loop over block-rows bm.
+    // Release the GIL for the compute-intensive section only.
+    // Using call_guard<gil_scoped_release> on the whole function can crash
+    // on macOS when OpenMP threads interact with Python's thread state
+    // during pybind11 argument cleanup.
+    py::gil_scoped_release release;
+
+#ifdef _OPENMP
     #pragma omp parallel for schedule(dynamic, 1)
 #endif
     for (int bm = 0; bm < N; bm += BLOCK_SIZE) {
@@ -473,6 +479,12 @@ void fill_impedance_mfie_cpp(
 
 #ifdef _OPENMP
     if (num_threads > 0) omp_set_num_threads(num_threads);
+#endif
+
+    // Release GIL for the compute-intensive section only (see EFIE comment)
+    py::gil_scoped_release release;
+
+#ifdef _OPENMP
     #pragma omp parallel for schedule(dynamic, 1)
 #endif
     for (int bm = 0; bm < N; bm += BLOCK_SIZE) {
@@ -690,6 +702,12 @@ void fill_impedance_cfie_cpp(
 
 #ifdef _OPENMP
     if (num_threads > 0) omp_set_num_threads(num_threads);
+#endif
+
+    // Release GIL for the compute-intensive section only (see EFIE comment)
+    py::gil_scoped_release release;
+
+#ifdef _OPENMP
     #pragma omp parallel for schedule(dynamic, 1)
 #endif
     for (int bm = 0; bm < N; bm += BLOCK_SIZE) {
@@ -871,8 +889,8 @@ Parameters
 ----------
 num_threads : int
     Number of OpenMP threads (0 = use OMP_NUM_THREADS or hardware default).
-          )pbdoc",
-          py::call_guard<py::gil_scoped_release>());
+          )pbdoc"
+          );  // GIL release disabled for debugging
 
     m.def("fill_impedance_mfie_cpp", &fill_impedance_mfie_cpp,
           py::arg("Z"),
@@ -902,8 +920,8 @@ Fill the MFIE K-term matrix Z in-place (Gram term added by post_assembly).
 
 tri_normals : float64 (N_t, 3) — outward unit normals per triangle.
 weights_near / bary_near : higher-order quadrature for near-field pairs.
-          )pbdoc",
-          py::call_guard<py::gil_scoped_release>());
+          )pbdoc"
+          );
 
     m.def("fill_impedance_cfie_cpp", &fill_impedance_cfie_cpp,
           py::arg("Z"),
@@ -935,6 +953,6 @@ Fill the CFIE impedance matrix Z in-place (fused EFIE + MFIE single pass).
 
 Z_mn = alpha*(jkη*I_A − jη/k*I_Phi) + (1−alpha)*η*I_K
 Gram term for MFIE contribution added by post_assembly.
-          )pbdoc",
-          py::call_guard<py::gil_scoped_release>());
+          )pbdoc"
+          );
 }

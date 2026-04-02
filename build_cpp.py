@@ -64,7 +64,11 @@ strata_dir = _known.with_strata
 # ---------------------------------------------------------------------------
 # Compiler flags
 # ---------------------------------------------------------------------------
-compile_args = ["-O3", "-march=native", "-std=c++17", "-DNDEBUG"]
+compile_args = ["-O3", "-std=c++17", "-DNDEBUG"]
+if platform.machine() != "arm64":
+    compile_args.append("-march=native")
+# Note: Apple Silicon uses -O3 without -march/-mcpu=native; Apple clang
+# rejects -march=native when targeting arm64.
 link_args: list[str] = []
 include_dirs = [np.get_include(), "src/cpp"]
 define_macros: list[tuple] = []
