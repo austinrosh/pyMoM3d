@@ -257,6 +257,7 @@ py::array_t<cdouble> scalar_G_smooth(
         // Strata returns G_phi = g/ε_r (Formulation-C convention).
         // Convert to our convention: g = G_phi * ε_r, then subtract g_fs.
         model.mgf.ComputeMGF(dx, dy, z, zp, G, G_phi);
+        if (std::isnan(G_phi.real()) || std::isnan(G_phi.imag())) G_phi = {0.0, 0.0};
 
         double R = std::sqrt(dx*dx + dy*dy + dz*dz);
         res(i) = G_phi * eps_r - free_space_scalar(k, R);
@@ -265,10 +266,12 @@ py::array_t<cdouble> scalar_G_smooth(
 }
 
 /**
- * Dyadic smooth correction G̅(r, r') − G̅_fs(r, r').
+ * Vector potential smooth correction G_A(r, r') − g_fs(R) · I.
  *
- * Strata returns the full multilayer dyadic; we subtract the free-space
- * dyadic GF (Chew formula) analytically.
+ * Strata's G_dyadic is the Formulation-C vector potential G_A.
+ * In free space G_A = g_fs · I (scalar GF times identity), so the smooth
+ * correction G_A - g_fs · I vanishes.  In layered media the off-diagonal
+ * and modified diagonal components capture the substrate / ground effects.
  *
  * r_obs, r_src : (N, 3) float64.
  * Returns (N, 3, 3) complex128.  Row-major: result[i, row, col].
@@ -286,7 +289,6 @@ py::array_t<cdouble> dyadic_G_smooth(
     auto res    = result.mutable_unchecked<3>();
 
     std::array<cdouble, 9> G;
-    std::array<cdouble, 9> G_fs;
     cdouble G_phi;
     const cdouble k = model.k_src;
 
@@ -297,16 +299,18 @@ py::array_t<cdouble> dyadic_G_smooth(
         const double z  = obs(i, 2);
         const double zp = src(i, 2);
 
-        // Full multilayer dyadic from Strata
+        // Full multilayer vector potential from Strata
         model.mgf.ComputeMGF(dx, dy, z, zp, G, G_phi);
+        for (auto& v : G) if (std::isnan(v.real()) || std::isnan(v.imag())) v = {0.0, 0.0};
 
-        // Compute free-space dyadic
-        free_space_dyadic(k, dx, dy, dz, G_fs);
+        // Free-space vector potential: g_fs(R) * I
+        double R = std::sqrt(dx*dx + dy*dy + dz*dz);
+        cdouble g_fs = free_space_scalar(k, R);
 
-        // Subtract: G_smooth = G_ML - G_fs
+        // Subtract: G_A_smooth = G_A_ML - g_fs * I
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 3; ++c)
-                res(i, r, c) = G[r * 3 + c] - G_fs[r * 3 + c];
+                res(i, r, c) = G[r * 3 + c] - ((r == c) ? g_fs : cdouble{0.0, 0.0});
     }
     return result;
 }
@@ -464,6 +468,14 @@ static inline void triangle_pair_multilayer(
             std::array<cdouble, 9> G_dyadic;
             cdouble G_phi;
 
+            // Accumulate weighted G_A correction for singular-point interpolation
+            std::array<cdouble, 9> ga_corr_sum{};
+
+            // Sanitize NaN from DCIM z-coupling components (dual-PEC workaround)
+            auto sanitize_nan = [](std::array<cdouble, 9>& G, cdouble& Gp) {
+                for (auto& v : G) if (std::isnan(v.real()) || std::isnan(v.imag())) v = {0.0, 0.0};
+                if (std::isnan(Gp.real()) || std::isnan(Gp.imag())) Gp = {0.0, 0.0};
+            };
             constexpr double R_SMOOTH_THRESH = 1e-10;
             double w_regular = 0.0;   // sum of weights for non-singular points
             double w_singular = 0.0;  // sum of weights for singular points
@@ -491,31 +503,49 @@ static inline void triangle_pair_multilayer(
                 }
 
                 mgf.ComputeMGF(dx, dy, r_obs[2], r_src[2], G_dyadic, G_phi);
+                sanitize_nan(G_dyadic, G_phi);
 
-                // Formulation-C: G_phi = g/ε_r → g_ML = G_phi * ε_r
-                // Use k (free-space) for consistency with green_singular()
-                cd g_corr = G_phi * eps_r_src - free_space_scalar(cdouble(k, 0.0), R);
+                // Scalar potential: Formulation-C G_phi = g/ε_r → g_ML = G_phi * ε_r
+                cd g_fs_val = free_space_scalar(cdouble(k, 0.0), R);
+                cd g_corr = G_phi * eps_r_src - g_fs_val;
 
                 g_smooth += weights[j] * g_corr;
                 w_regular += weights[j];
 
+                // Vector potential: use dyadic G_A correction
+                // G_A_corr[i][j] = G_dyadic[i*3+j] - δ_ij * g_fs
+                // In free space G_A = g_fs * I, so the correction vanishes.
                 v3 rho = sub3(r_src, r_fv_src);
-                rho_g_smooth[0] += weights[j] * rho[0] * g_corr;
-                rho_g_smooth[1] += weights[j] * rho[1] * g_corr;
-                rho_g_smooth[2] += weights[j] * rho[2] * g_corr;
+                for (int ii = 0; ii < 3; ++ii) {
+                    cd ga_rho_ii{0.0, 0.0};
+                    for (int jj = 0; jj < 3; ++jj) {
+                        cd ga_corr_ij = G_dyadic[ii*3+jj]
+                                      - ((ii == jj) ? g_fs_val : cd{0.0, 0.0});
+                        ga_corr_sum[ii*3+jj] += weights[j] * ga_corr_ij;
+                        ga_rho_ii += ga_corr_ij * rho[jj];
+                    }
+                    rho_g_smooth[ii] += weights[j] * ga_rho_ii;
+                }
             }
 
-            // Interpolate: estimate g_corr at singular points using the
+            // Interpolate: estimate corrections at singular points using the
             // weighted average from regular points.
             if (n_singular > 0 && w_regular > 0.0) {
                 cd g_corr_avg = g_smooth / w_regular;
                 g_smooth += w_singular * g_corr_avg;
 
-                // For the rho-weighted correction, use g_corr_avg * rho
+                // Average dyadic G_A correction for singular-point interpolation
+                std::array<cdouble, 9> ga_corr_avg{};
+                for (int p = 0; p < 9; ++p)
+                    ga_corr_avg[p] = ga_corr_sum[p] / w_regular;
+
                 for (int s = 0; s < n_singular; ++s) {
-                    rho_g_smooth[0] += w_singular_arr[s] * rho_singular[s][0] * g_corr_avg;
-                    rho_g_smooth[1] += w_singular_arr[s] * rho_singular[s][1] * g_corr_avg;
-                    rho_g_smooth[2] += w_singular_arr[s] * rho_singular[s][2] * g_corr_avg;
+                    for (int ii = 0; ii < 3; ++ii) {
+                        cd ga_rho_ii{0.0, 0.0};
+                        for (int jj = 0; jj < 3; ++jj)
+                            ga_rho_ii += ga_corr_avg[ii*3+jj] * rho_singular[s][jj];
+                        rho_g_smooth[ii] += w_singular_arr[s] * ga_rho_ii;
+                    }
                 }
             }
 
@@ -539,16 +569,22 @@ static inline void triangle_pair_multilayer(
                 double dy = r_obs[1] - r_src[1];
 
                 mgf.ComputeMGF(dx, dy, r_obs[2], r_src[2], G_dyadic, G_phi);
+                // Sanitize NaN from DCIM (dual-PEC workaround)
+                for (auto& v : G_dyadic) if (std::isnan(v.real()) || std::isnan(v.imag())) v = {0.0, 0.0};
+                if (std::isnan(G_phi.real()) || std::isnan(G_phi.imag())) G_phi = {0.0, 0.0};
 
-                // Full G_ML = G_phi * ε_r (Formulation-C)
+                // Scalar potential: full G_ML = G_phi * ε_r (Formulation-C)
                 cd g_ml = G_phi * eps_r_src;
-
                 g_int += weights[j] * g_ml;
 
+                // Vector potential: use full dyadic G_A from Strata
                 v3 rho = sub3(r_src, r_fv_src);
-                rho_src_g_int[0] += weights[j] * rho[0] * g_ml;
-                rho_src_g_int[1] += weights[j] * rho[1] * g_ml;
-                rho_src_g_int[2] += weights[j] * rho[2] * g_ml;
+                for (int ii = 0; ii < 3; ++ii) {
+                    cd ga_rho_ii{0.0, 0.0};
+                    for (int jj = 0; jj < 3; ++jj)
+                        ga_rho_ii += G_dyadic[ii*3+jj] * rho[jj];
+                    rho_src_g_int[ii] += weights[j] * ga_rho_ii;
+                }
             }
 
             g_int              *= twice_area_src;
@@ -661,7 +697,8 @@ void fill_impedance_multilayer_cpp(
     // Cross-layer support (optional)
     py::array_t<int32_t, py::array::c_style>  tri_layer_idx_arr,
     py::list                                   extra_models,
-    py::array_t<int32_t, py::array::c_style>  model_lookup_arr)
+    py::array_t<int32_t, py::array::c_style>  model_lookup_arr,
+    bool a_only = false)
 {
     // --- Obtain raw pointers ---
     cd*            Z              = Z_arr.mutable_data();
@@ -905,7 +942,8 @@ void fill_impedance_multilayer_cpp(
                         I_A, I_Phi);
                     I_A_total += I_A; I_Phi_total += I_Phi;
 
-                    cd val = prefactor_A * I_A_total + prefactor_Phi * I_Phi_total;
+                    cd val = a_only ? (prefactor_A * I_A_total)
+                                   : (prefactor_A * I_A_total + prefactor_Phi * I_Phi_total);
                     Z[m * N + n] = val;
                     if (m != n)
                         Z[n * N + m] = val;
@@ -1002,7 +1040,9 @@ method : str
         py::arg("tri_layer_idx") = py::array_t<int32_t>(),
         py::arg("extra_models") = py::list(),
         py::arg("model_lookup") = py::array_t<int32_t>(),
+        py::arg("a_only") = false,
         "C++-accelerated multilayer EFIE impedance matrix fill. "
         "Calls Strata ComputeMGF directly from C++ with OpenMP parallelism. "
-        "Optional cross-layer support via tri_layer_idx, extra_models, model_lookup.");
+        "Optional cross-layer support via tri_layer_idx, extra_models, model_lookup. "
+        "Set a_only=True for vector-potential-only assembly (A-EFIE).");
 }

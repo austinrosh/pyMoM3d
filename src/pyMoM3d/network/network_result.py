@@ -153,23 +153,63 @@ class NetworkResult:
         series_Z: list,
         shunt_Y: list,
     ) -> 'NetworkResult':
-        """Subtract lumped gap parasitics (series Z, shunt Y) at each port.
+        """Subtract lumped gap parasitics via open-short de-embedding.
 
-        Intended for cases where the gap geometry is known or calibrated.
-        Approximate analytical estimates:
-            series inductance:  Z_L = jω μ₀ d / (2π)  (d = gap width)
-            shunt capacitance:  Y_C = jω ε₀ w          (w = edge width)
+        Removes series impedance and shunt admittance at each port,
+        following the standard open-short calibration procedure used in
+        on-wafer measurements.
+
+        De-embedding order (outside-in):
+
+        1. Remove shunt Y:  ``Y_temp[p, p] -= shunt_Y[p]``
+        2. Remove series Z: ``Z_temp[p, p] -= series_Z[p]``
+
+        Approximate analytical estimates for the gap parasitics:
+
+        - Series inductance: ``Z_L = jω μ₀ d / (2π)``  (d = gap width)
+        - Shunt capacitance: ``Y_C = jω ε₀ w``  (w = edge width)
 
         For accurate corrections, calibration against a known reference
         structure (open/short stub) is recommended.
 
-        .. note::
-            Not yet implemented.  Raise NotImplementedError to signal that
-            the data structure is ready for this extension.
+        Parameters
+        ----------
+        series_Z : list of complex, length P
+            Series impedance to subtract at each port (Ω).
+        shunt_Y : list of complex, length P
+            Shunt admittance to subtract at each port (S).
+
+        Returns
+        -------
+        NetworkResult
+            New result with de-embedded Z_matrix.  ``I_solutions`` is not
+            transferred (they correspond to the original reference plane).
         """
-        raise NotImplementedError(
-            "correct_port_parasitics is planned for Phase 2.  "
-            "Use deembed_phase for reference-plane shifts in the meantime."
+        P = len(self.Z_matrix)
+        series_Z = np.asarray(series_Z, dtype=np.complex128)
+        shunt_Y = np.asarray(shunt_Y, dtype=np.complex128)
+        if len(series_Z) != P or len(shunt_Y) != P:
+            raise ValueError(
+                f"series_Z and shunt_Y must have length {P} "
+                f"(got {len(series_Z)}, {len(shunt_Y)})"
+            )
+
+        # Step 1: remove shunt admittance in Y-domain
+        Y_temp = self.Y_matrix.copy()
+        for p in range(P):
+            Y_temp[p, p] -= shunt_Y[p]
+
+        # Step 2: remove series impedance in Z-domain
+        Z_temp = np.linalg.inv(Y_temp)
+        for p in range(P):
+            Z_temp[p, p] -= series_Z[p]
+
+        return NetworkResult(
+            frequency=self.frequency,
+            Z_matrix=Z_temp,
+            port_names=list(self.port_names),
+            Z0=self.Z0,
+            condition_number=self.condition_number,
         )
 
     # ------------------------------------------------------------------

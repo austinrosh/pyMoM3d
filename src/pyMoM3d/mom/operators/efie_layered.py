@@ -52,11 +52,15 @@ class MultilayerEFIEOperator(EFIEOperator):
         Must expose scalar_G(r, r_prime) returning the SMOOTH CORRECTION
         G_ML - G_fs for same-layer interactions and the FULL G_ML for
         cross-layer interactions.
+    a_only : bool, optional
+        If True, assemble only the vector-potential (A) term, dropping
+        the scalar-potential (Phi) term.  Used for A-EFIE.  Default False.
     """
 
-    def __init__(self, greens_fn: GreensFunctionBase):
+    def __init__(self, greens_fn: GreensFunctionBase, a_only: bool = False):
         super().__init__()
         self._greens = greens_fn
+        self._a_only = a_only
         # Detect StrataBackend with a valid model for C++ fast path
         self._strata_model = None
         self._strata_backend = None
@@ -174,16 +178,25 @@ class MultilayerEFIEOperator(EFIEOperator):
                                 model_lookup[obs_ri * M + src_ri] = len(extra_models)
                                 # extra_models are 1-indexed (0 = default model)
 
+            # C++ kernel uses real k for free-space singular extraction
+            # (Graglia 1993) and real eta for EFIE prefactors.  For the
+            # phantom source layer k and eta are nearly real; any small
+            # imaginary part from conductivity is handled by the Strata
+            # smooth correction.
+            k_real   = float(k.real)   if hasattr(k, 'real')   else float(k)
+            eta_real = float(eta.real) if hasattr(eta, 'real') else float(eta)
+
             _fill_impedance_multilayer_cpp(
                 Z, verts, tris, t_plus, t_minus, fv_plus, fv_minus,
                 a_plus, a_minus, elen, cents, medge, tarea,
                 weights, bary,
-                float(k), float(eta), float(near_threshold), int(quad_order),
+                k_real, eta_real, float(near_threshold), int(quad_order),
                 self._strata_model,
                 0,  # num_threads: 0 = OMP default
                 tri_layer_idx,
                 extra_models,
                 model_lookup,
+                self._a_only,
             )
         else:
             raise ValueError(
@@ -292,46 +305,73 @@ class MultilayerEFIEOperator(EFIEOperator):
         I_Phi_raw *= twice_area_test
 
         # ------------------------------------------------------------------
-        # Vector potential integral I_A
+        # Vector potential integral I_A  (uses dyadic G_A, NOT scalar g)
+        #
+        # In layered media the vector potential GF G_A is a dyadic (3×3).
+        # In free space G_A = g_fs · I, so the singular extraction
+        # (Graglia) still uses scalar g_fs × rho_src.  The smooth
+        # correction uses (G_A - g_fs·I) · rho_src (dyadic product).
         # ------------------------------------------------------------------
         I_A_raw = 0.0 + 0.0j
+
+        # Check if dyadic_G is available on the backend
+        _has_dyadic = hasattr(gf, 'dyadic_G')
 
         for i in range(Q):
             r_obs_i    = r_obs_all[i]
             rho_test_i = rho_test_all[i]
 
             if same_layer and is_near:
-                # Singular rho-weighted term (Graglia)
+                # Singular rho-weighted term (Graglia) — free-space g_fs × I
                 rho_src_g = integrate_rho_green_singular(
                     k, r_obs_i,
                     verts_src[0], verts_src[1], verts_src[2],
                     r_fv_src, quad_order=quad_order, near_threshold=near_threshold,
                 )
-                # Smooth correction for vector potential: (G_ML - G_fs) * rho_src
+                # Smooth correction: (G_A - g_fs·I) · rho_src
                 r_obs_tiled = np.tile(r_obs_i, (Q, 1))
-                g_corr_vals = gf.scalar_G(r_obs_tiled, r_src_all)   # (Q,)
-                rho_src_g_smooth = np.einsum('j,ji,j->i', weights, rho_src_all, g_corr_vals) * twice_area_src
+                if _has_dyadic:
+                    # G_A_corr shape (Q, 3, 3)
+                    ga_corr = gf.dyadic_G(r_obs_tiled, r_src_all)
+                    # rho_src_g_smooth[i] = Σ_j weights[j] * Σ_k GA_corr[j,i,k] * rho[j,k]
+                    ga_dot_rho = np.einsum('jik,jk->ji', ga_corr, rho_src_all)  # (Q, 3)
+                    rho_src_g_smooth = np.einsum('j,ji->i', weights, ga_dot_rho) * twice_area_src
+                else:
+                    # Fallback: use scalar_G (approximate, same as free-space)
+                    g_corr_vals = gf.scalar_G(r_obs_tiled, r_src_all)
+                    rho_src_g_smooth = np.einsum('j,ji,j->i', weights, rho_src_all, g_corr_vals) * twice_area_src
                 rho_src_g_int = rho_src_g + rho_src_g_smooth
 
             elif same_layer:
-                # Free-space rho-g term
+                # Free-space rho-g term: g_fs · I · rho_src = g_fs * rho_src
                 diff = r_obs_i[np.newaxis, :] - r_src_all   # (Q, 3)
                 R = np.linalg.norm(diff, axis=-1)
                 R = np.maximum(R, 1e-30)
                 g_fs_vals = np.exp(-1j * k * R) / (4.0 * np.pi * R)   # (Q,)
                 rho_src_g_fs = np.einsum('j,ji,j->i', weights, rho_src_all, g_fs_vals) * twice_area_src
 
-                # Smooth correction
+                # Smooth correction: (G_A - g_fs·I) · rho_src
                 r_obs_tiled = np.tile(r_obs_i, (Q, 1))
-                g_corr_vals = gf.scalar_G(r_obs_tiled, r_src_all)
-                rho_src_g_corr = np.einsum('j,ji,j->i', weights, rho_src_all, g_corr_vals) * twice_area_src
+                if _has_dyadic:
+                    ga_corr = gf.dyadic_G(r_obs_tiled, r_src_all)
+                    ga_dot_rho = np.einsum('jik,jk->ji', ga_corr, rho_src_all)
+                    rho_src_g_corr = np.einsum('j,ji->i', weights, ga_dot_rho) * twice_area_src
+                else:
+                    g_corr_vals = gf.scalar_G(r_obs_tiled, r_src_all)
+                    rho_src_g_corr = np.einsum('j,ji,j->i', weights, rho_src_all, g_corr_vals) * twice_area_src
                 rho_src_g_int = rho_src_g_fs + rho_src_g_corr
 
             else:
-                # Cross-layer: full G_ML
+                # Cross-layer: full G_A (no singularity extraction)
                 r_obs_tiled = np.tile(r_obs_i, (Q, 1))
-                g_ml_vals = gf.scalar_G(r_obs_tiled, r_src_all)
-                rho_src_g_int = np.einsum('j,ji,j->i', weights, rho_src_all, g_ml_vals) * twice_area_src
+                if _has_dyadic:
+                    ga_full = gf.dyadic_G(r_obs_tiled, r_src_all,
+                                          return_correction=False)
+                    ga_dot_rho = np.einsum('jik,jk->ji', ga_full, rho_src_all)
+                    rho_src_g_int = np.einsum('j,ji->i', weights, ga_dot_rho) * twice_area_src
+                else:
+                    g_ml_vals = gf.scalar_G(r_obs_tiled, r_src_all)
+                    rho_src_g_int = np.einsum('j,ji,j->i', weights, rho_src_all, g_ml_vals) * twice_area_src
 
             I_A_raw += weights[i] * np.dot(rho_test_i, rho_src_g_int)
 
@@ -341,9 +381,12 @@ class MultilayerEFIEOperator(EFIEOperator):
         # Assemble Z contribution
         # ------------------------------------------------------------------
         scale_A   = (sign_test * l_test / (2.0 * A_test)) * (sign_src * l_src / (2.0 * A_src))
-        scale_Phi = (sign_test * l_test / A_test)          * (sign_src * l_src / A_src)
-
         prefactor_A   = 1j * k * eta
+
+        if self._a_only:
+            return prefactor_A * I_A_raw * scale_A
+
+        scale_Phi = (sign_test * l_test / A_test)          * (sign_src * l_src / A_src)
         prefactor_Phi = -1j * eta / k
 
         return prefactor_A * I_A_raw * scale_A + prefactor_Phi * I_Phi_raw * scale_Phi

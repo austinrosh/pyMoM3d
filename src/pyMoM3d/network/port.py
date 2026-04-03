@@ -271,3 +271,49 @@ class Port:
             s * I_coeffs[m] * rwg_basis.edge_length[m]
             for s, m in zip(signs, self.feed_basis_indices)
         )
+
+
+@dataclass
+class GroundVia:
+    """Lumped via connecting conductor basis functions to the GF ground plane.
+
+    Models a vertical connection from the conductor mesh (at z = z_mesh)
+    down to the PEC ground plane (implicit in the layered Green's function).
+    Implemented by adding a small impedance Z_via to the Z_sys diagonal at
+    the via location, forcing near-zero potential there.
+
+    This is the MoM equivalent of a "via-to-ground port" in EMX / Palace.
+    No vertical mesh is needed — the ground plane is already in the GF.
+
+    Parameters
+    ----------
+    name : str
+        Via label (for diagnostics).
+    basis_indices : list of int
+        RWG basis indices at the via location.
+    impedance : complex, optional
+        Total via impedance (Ohm).  Default 0 (ideal short to ground).
+        For a physical via, can include R_via + jωL_via.
+    """
+
+    name: str
+    basis_indices: List[int]
+    impedance: complex = 0.0
+
+    def apply_to_matrix(self, Z_sys: np.ndarray, rwg_basis) -> None:
+        """Add via ground-return path to the impedance matrix.
+
+        For an ideal via (impedance ≈ 0), adds a very small impedance
+        to the diagonal, effectively shorting those basis functions to
+        ground.  For a finite impedance, distributes it across the
+        parallel via edges.
+        """
+        n_via = len(self.basis_indices)
+        if n_via == 0:
+            return
+        for m in self.basis_indices:
+            if abs(self.impedance) < 1e-30:
+                # Ideal short: add small impedance (large admittance)
+                Z_sys[m, m] += 1e-8
+            else:
+                Z_sys[m, m] += self.impedance / n_via

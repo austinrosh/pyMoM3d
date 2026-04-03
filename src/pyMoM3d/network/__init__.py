@@ -11,8 +11,8 @@ NetworkExtractor
     solves P RHS simultaneously, returns list[NetworkResult].
 """
 
-from .port import Port
+from .port import Port, GroundVia
 from .network_result import NetworkResult
 from .extractor import NetworkExtractor
 
-__all__ = ['Port', 'NetworkResult', 'NetworkExtractor']
+__all__ = ['Port', 'GroundVia', 'NetworkResult', 'NetworkExtractor']

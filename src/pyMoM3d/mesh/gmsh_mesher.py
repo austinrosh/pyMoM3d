@@ -455,6 +455,74 @@ class GmshMesher:
 
         return mesh
 
+    def mesh_plate_with_feeds(
+        self,
+        width: float,
+        height: float,
+        feed_x_list: list,
+        center: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+        target_edge_length: Optional[float] = None,
+    ) -> Mesh:
+        """Generate a plate mesh with forced transverse mesh lines at multiple x-coordinates.
+
+        Creates N+1 rectangular segments joined at each feed_x, ensuring
+        conformal transverse edges at every port location.
+
+        Parameters
+        ----------
+        width : float
+            Width along x-axis in meters.
+        height : float
+            Height along y-axis in meters.
+        feed_x_list : list of float
+            x-coordinates of feed lines (must be within plate extent).
+        center : tuple of float
+            Center coordinates (x, y, z).
+        target_edge_length : float, optional
+            Override instance-level target edge length.
+
+        Returns
+        -------
+        mesh : Mesh
+        """
+        self._init_gmsh()
+        try:
+            if target_edge_length is not None:
+                old = self.target_edge_length
+                self.target_edge_length = target_edge_length
+
+            cx, cy, cz = center
+            x0 = cx - width / 2.0
+            y0 = cy - height / 2.0
+
+            # Sort feed positions and build segment boundaries
+            cuts = sorted(feed_x_list)
+            boundaries = [x0] + cuts + [x0 + width]
+
+            rects = []
+            for i in range(len(boundaries) - 1):
+                w_seg = boundaries[i + 1] - boundaries[i]
+                if w_seg > 1e-15:
+                    tag = gmsh.model.occ.addRectangle(
+                        boundaries[i], y0, cz, w_seg, height
+                    )
+                    rects.append(tag)
+
+            # Fragment all rectangles to merge shared boundaries
+            if len(rects) > 1:
+                tool_dimtags = [(2, t) for t in rects[1:]]
+                gmsh.model.occ.fragment([(2, rects[0])], tool_dimtags)
+
+            mesh = self._generate_mesh()
+
+            if target_edge_length is not None:
+                self.target_edge_length = old
+        except Exception:
+            self._finalize_gmsh()
+            raise
+
+        return mesh
+
     def mesh_from_geometry(self, geometry, **kwargs) -> Mesh:
         """
         Generate a mesh from a pyMoM3d geometry primitive.

@@ -27,6 +27,15 @@ from .plot_style import (
     format_plane_wave_annotation,
 )
 
+from .inductor_plots import (
+    plot_inductor_characterization,
+    plot_model_fit,
+    plot_z_vs_y_comparison,
+    format_inductance_label,
+    format_quality_factor_label,
+    format_resistance_label,
+)
+
 __all__ = [
     # Mesh plotting
     'plot_mesh',
@@ -48,6 +57,14 @@ __all__ = [
     'format_current_label',
     'format_directivity_label',
     'format_coordinate_label',
+    # Inductor label formatters
+    'format_inductance_label',
+    'format_quality_factor_label',
+    'format_resistance_label',
+    # Inductor plots
+    'plot_inductor_characterization',
+    'plot_model_fit',
+    'plot_z_vs_y_comparison',
     # Title formatters
     'format_rcs_title',
     'format_current_title',

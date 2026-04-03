@@ -173,7 +173,8 @@ void fill_impedance_cpp(
     double k, double eta,
     double near_threshold,
     int    quad_order,
-    int    num_threads)
+    int    num_threads,
+    bool   a_only = false)
 {
     // --- Obtain raw pointers (no copies, zero-overhead) ---
     cd*       Z               = Z_arr.mutable_data();
@@ -342,7 +343,8 @@ void fill_impedance_cpp(
                         is_near, near_threshold, I_A, I_Phi);
                     I_A_total += I_A; I_Phi_total += I_Phi;
 
-                    cd val = prefactor_A * I_A_total + prefactor_Phi * I_Phi_total;
+                    cd val = a_only ? (prefactor_A * I_A_total)
+                                   : (prefactor_A * I_A_total + prefactor_Phi * I_Phi_total);
                     Z[m * N + n] = val;
                     if (m != n)
                         Z[n * N + m] = val;
@@ -844,6 +846,123 @@ void fill_impedance_cfie_cpp(
 }
 
 // ---------------------------------------------------------------------------
+// Scalar Green's function matrix  G_s[t,t'] = ∫_t ∫_t' G(r,r') dS dS'
+//
+// Used by the A-EFIE (Augmented EFIE) formulation for frequency-stable
+// inductance extraction.  Simpler than fill_impedance_cpp: no RWG basis
+// function bookkeeping, just triangle-to-triangle scalar G integration.
+//
+// Symmetric: only computes upper triangle and mirrors.
+// OpenMP parallel over block-rows, same tiling strategy as EFIE kernel.
+// Near-field: reuses green_singular() from singularity.hpp.
+// ---------------------------------------------------------------------------
+void fill_scalar_green_cpp(
+    py::array_t<cd, py::array::c_style>      G_s_arr,
+    py::array_t<double,  py::array::c_style> vertices_arr,
+    py::array_t<int32_t, py::array::c_style> triangles_arr,
+    py::array_t<double,  py::array::c_style> tri_centroids_arr,
+    py::array_t<double,  py::array::c_style> tri_mean_edge_arr,
+    py::array_t<double,  py::array::c_style> tri_twice_area_arr,
+    py::array_t<double,  py::array::c_style> weights_arr,
+    py::array_t<double,  py::array::c_style> bary_arr,
+    double k,
+    double near_threshold,
+    int    quad_order,
+    int    num_threads)
+{
+    cd*           G_s          = G_s_arr.mutable_data();
+    const double*  vertices     = vertices_arr.data();
+    const int32_t* triangles    = triangles_arr.data();
+    const double*  tri_centroids = tri_centroids_arr.data();
+    const double*  tri_mean_edge = tri_mean_edge_arr.data();
+    const double*  tri_twice_area = tri_twice_area_arr.data();
+    const double*  weights      = weights_arr.data();
+    const double*  bary         = bary_arr.data();
+
+    const int T  = static_cast<int>(tri_twice_area_arr.shape(0));
+    const int nq = static_cast<int>(weights_arr.shape(0));
+
+    // Release GIL for parallel execution
+    py::gil_scoped_release release;
+
+#ifdef _OPENMP
+    if (num_threads > 0)
+        omp_set_num_threads(num_threads);
+#endif
+
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(dynamic, 1)
+#endif
+    for (int bt = 0; bt < T; bt += BLOCK_SIZE) {
+        const int t_end = std::min(bt + BLOCK_SIZE, T);
+
+        // Cache geometry for test triangles in this block
+        v3 verts_t[BLOCK_SIZE][3];
+        v3 centroid_t[BLOCK_SIZE];
+        double ta_t[BLOCK_SIZE];  // twice_area
+        double me_t[BLOCK_SIZE];  // mean_edge
+
+        for (int t = bt; t < t_end; ++t) {
+            int loc = t - bt;
+            load_triangle(vertices, triangles, t, verts_t[loc]);
+            centroid_t[loc] = load_centroid(tri_centroids, t);
+            ta_t[loc] = tri_twice_area[t];
+            me_t[loc] = tri_mean_edge[t];
+        }
+
+        // Loop over source triangle blocks (only upper triangle: bs >= bt)
+        for (int bs = bt; bs < T; bs += BLOCK_SIZE) {
+            const int s_end = std::min(bs + BLOCK_SIZE, T);
+
+            // Cache geometry for source triangles
+            v3 verts_s[BLOCK_SIZE][3];
+            v3 centroid_s[BLOCK_SIZE];
+            double ta_s[BLOCK_SIZE];
+            double me_s[BLOCK_SIZE];
+
+            for (int s = bs; s < s_end; ++s) {
+                int loc = s - bs;
+                load_triangle(vertices, triangles, s, verts_s[loc]);
+                centroid_s[loc] = load_centroid(tri_centroids, s);
+                ta_s[loc] = tri_twice_area[s];
+                me_s[loc] = tri_mean_edge[s];
+            }
+
+            // Compute G_s for each (test, source) pair in this block
+            for (int t = bt; t < t_end; ++t) {
+                int t_loc = t - bt;
+                int s_start_inner = (bs == bt) ? t : bs;  // upper triangle
+
+                for (int s = s_start_inner; s < s_end; ++s) {
+                    int s_loc = s - bs;
+
+                    // Accumulate ∫_t ∫_s G(r,r') dS dS'
+                    // Outer quadrature over test triangle
+                    cd val{0.0, 0.0};
+                    for (int p = 0; p < nq; ++p) {
+                        v3 r_obs = bary_interp(bary + p*3,
+                            verts_t[t_loc][0], verts_t[t_loc][1], verts_t[t_loc][2]);
+
+                        // Inner integral over source triangle using
+                        // green_singular (handles near/far automatically)
+                        cd g_int = green_singular(k, r_obs,
+                            verts_s[s_loc][0], verts_s[s_loc][1], verts_s[s_loc][2],
+                            nq, weights, bary, ta_s[s_loc], near_threshold);
+
+                        val += weights[p] * g_int;
+                    }
+                    val *= ta_t[t_loc];  // multiply by test twice_area
+
+                    G_s[t * T + s] = val;
+                    if (t != s)
+                        G_s[s * T + t] = val;  // symmetric
+                }
+            }
+        } // bs block loop
+    } // bt block loop (OpenMP parallel)
+}
+
+// ---------------------------------------------------------------------------
 // pybind11 module definition
 // ---------------------------------------------------------------------------
 PYBIND11_MODULE(_cpp_kernels, m) {
@@ -878,6 +997,7 @@ PYBIND11_MODULE(_cpp_kernels, m) {
           py::arg("near_threshold"),
           py::arg("quad_order"),
           py::arg("num_threads") = 0,
+          py::arg("a_only") = false,
           R"pbdoc(
 Fill the EFIE impedance matrix Z in-place.
 
@@ -889,6 +1009,10 @@ Parameters
 ----------
 num_threads : int
     Number of OpenMP threads (0 = use OMP_NUM_THREADS or hardware default).
+a_only : bool
+    If True, assemble only the vector-potential (A) term, omitting the
+    scalar-potential (Phi) term.  Used by VectorPotentialOperator for
+    loop-star inductance extraction.
           )pbdoc"
           );  // GIL release disabled for debugging
 
@@ -953,6 +1077,29 @@ Fill the CFIE impedance matrix Z in-place (fused EFIE + MFIE single pass).
 
 Z_mn = alpha*(jkη*I_A − jη/k*I_Phi) + (1−alpha)*η*I_K
 Gram term for MFIE contribution added by post_assembly.
+          )pbdoc"
+          );
+
+    m.def("fill_scalar_green_cpp", &fill_scalar_green_cpp,
+          py::arg("G_s"),
+          py::arg("vertices"),
+          py::arg("triangles"),
+          py::arg("tri_centroids"),
+          py::arg("tri_mean_edge"),
+          py::arg("tri_twice_area"),
+          py::arg("weights"),
+          py::arg("bary"),
+          py::arg("k"),
+          py::arg("near_threshold"),
+          py::arg("quad_order"),
+          py::arg("num_threads") = 0,
+          R"pbdoc(
+Fill the triangle-to-triangle scalar Green's function matrix G_s in-place.
+
+G_s[t,t'] = integral_t integral_t' exp(-jkR)/(4*pi*R) dS dS'
+
+Used by the A-EFIE formulation for frequency-stable inductance extraction.
+Symmetric matrix; only the upper triangle is computed and mirrored.
           )pbdoc"
           );
 }

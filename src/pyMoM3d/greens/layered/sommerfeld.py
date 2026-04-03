@@ -372,6 +372,7 @@ def _select_backend(
     layer_stack: LayerStack,
     frequency: float,
     backend: str,
+    source_layer=None,
 ) -> GreensBackend:
     """Return the appropriate GreensBackend for the given spec.
 
@@ -381,7 +382,8 @@ def _select_backend(
     'dcim' is tried first; falls back to 'empymod' for unsupported stacks
     (e.g., three-or-more layers).
     """
-    source_layer = layer_stack.layers[-1]   # topmost — default for air-over-substrate
+    if source_layer is None:
+        source_layer = layer_stack.layers[-1]   # topmost — default for air-over-substrate
 
     if backend == 'auto':
         # Phase 3 dispatch order: strata → layer_recursion → dcim → empymod
@@ -486,7 +488,10 @@ class LayeredGreensFunction(GreensFunctionBase):
             # Accept a pre-built backend instance directly (e.g. TabulatedPNGFBackend)
             self._backend = backend
         else:
-            self._backend = _select_backend(layer_stack, frequency, backend)
+            self._backend = _select_backend(
+                layer_stack, frequency, backend,
+                source_layer=self._src_layer,
+            )
 
     @property
     def wavenumber(self) -> complex:

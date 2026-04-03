@@ -234,10 +234,11 @@ class TestNetworkResult:
         with pytest.raises(ValueError, match='delta_theta length'):
             result.deembed_phase([0.1])
 
-    def test_correct_port_parasitics_not_implemented(self):
+    def test_correct_port_parasitics_zero_is_identity(self):
+        """Zero parasitics should return approximately the same Z_matrix."""
         result = self._make_result()
-        with pytest.raises(NotImplementedError):
-            result.correct_port_parasitics([0j], [0j])
+        deembed = result.correct_port_parasitics([0j], [0j])
+        np.testing.assert_allclose(deembed.Z_matrix, result.Z_matrix, rtol=1e-10)
 
     def test_save_load_roundtrip(self):
         result = self._make_2port_result()

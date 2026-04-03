@@ -32,6 +32,13 @@ from .visualization import (
     format_current_title,
     format_resonance_annotation,
     format_plane_wave_annotation,
+    # Inductor plots
+    plot_inductor_characterization,
+    plot_model_fit,
+    plot_z_vs_y_comparison,
+    format_inductance_label,
+    format_quality_factor_label,
+    format_resistance_label,
 )
 from .utils.constants import c0, mu0, eps0, eta0
 from .utils.reporter import TerminalReporter, SilentReporter, RecordingReporter
@@ -60,10 +67,26 @@ from .arrays import (
 )
 from .simulation import Simulation, SimulationConfig, SimulationResult, load_stl
 from .network import Port, NetworkResult, NetworkExtractor
+from .network.port import GroundVia
 from .medium import Layer, LayerStack
+from .analysis.transmission_line import (
+    microstrip_z0_hammerstad, stripline_z0_cohn,
+    s_to_abcd, extract_propagation_constant, extract_z0_from_s,
+)
+from .analysis.inductor import (
+    wheeler_inductance, quality_factor, inductance_from_z,
+    inductance_from_y, quality_factor_y, resistance_from_y,
+    self_resonant_frequency,
+)
+from .analysis.inductor_model import PiModelParams, fit_pi_model
+from .analysis.inductor_characterization import (
+    InductorCharacterization, CharacterizationResult,
+)
 from .greens.layered import LayeredGreensFunction
 from .greens.free_space_gf import FreeSpaceGreensFunction
 from .mom.operators.efie_layered import MultilayerEFIEOperator
+from .mom.surface_impedance import ConductorProperties
+from .peec import PEECExtractor, Trace, TraceNetwork, PEECPort
 __version__ = '0.2.0'
 
 __all__ = [
@@ -101,10 +124,28 @@ __all__ = [
     # Simulation
     'Simulation', 'SimulationConfig', 'SimulationResult', 'load_stl',
     # Network extraction
-    'Port', 'NetworkResult', 'NetworkExtractor',
+    'Port', 'GroundVia', 'NetworkResult', 'NetworkExtractor',
     # Multilayer
     'Layer', 'LayerStack', 'LayeredGreensFunction',
     'FreeSpaceGreensFunction', 'MultilayerEFIEOperator',
+    # Surface impedance
+    'ConductorProperties',
+    # Analysis — transmission line
+    'microstrip_z0_hammerstad', 'stripline_z0_cohn',
+    's_to_abcd', 'extract_propagation_constant', 'extract_z0_from_s',
+    # Analysis — inductor (Z-based)
+    'wheeler_inductance', 'quality_factor', 'inductance_from_z',
+    # Analysis — inductor (Y-based, EDA standard)
+    'inductance_from_y', 'quality_factor_y', 'resistance_from_y',
+    'self_resonant_frequency',
+    # Analysis — inductor model & characterization
+    'PiModelParams', 'fit_pi_model',
+    'InductorCharacterization', 'CharacterizationResult',
+    # Inductor plots
+    'plot_inductor_characterization', 'plot_model_fit', 'plot_z_vs_y_comparison',
+    'format_inductance_label', 'format_quality_factor_label', 'format_resistance_label',
+    # PEEC extraction
+    'PEECExtractor', 'Trace', 'TraceNetwork', 'PEECPort',
     # Reporter
     'TerminalReporter', 'SilentReporter', 'RecordingReporter',
 ]

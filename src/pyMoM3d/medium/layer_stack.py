@@ -40,6 +40,11 @@ class Layer:
     conductivity : float
         Ohmic conductivity (S/m).  Added to Im(eps_r) via eps_eff formula.
         Use this for metals and semiconductors instead of a large Im(eps_r).
+    is_pec : bool
+        If True, this layer acts as a perfect electric conductor.  Only
+        meaningful for half-space layers (z_bot = -inf or z_top = inf).
+        When set, the Strata backend passes ``pec_bot=True`` or
+        ``pec_top=True`` to model an image-theory ground plane.
     """
 
     name: str
@@ -48,6 +53,7 @@ class Layer:
     eps_r: complex = 1.0 + 0.0j
     mu_r: complex = 1.0 + 0.0j
     conductivity: float = 0.0  # S/m
+    is_pec: bool = False
 
     def eps_r_eff(self, omega: float) -> complex:
         """Complex effective permittivity including ohmic loss.

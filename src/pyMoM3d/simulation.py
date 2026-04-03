@@ -57,6 +57,7 @@ class SimulationConfig:
     enable_report: bool = False
     report_dir: str = 'results/simulation_info'
     layer_stack: Optional['LayerStack'] = None
+    source_layer_name: Optional[str] = None
 
 
 @dataclass
@@ -293,6 +294,7 @@ class Simulation:
             from .greens.layered import LayeredGreensFunction
             _gf = LayeredGreensFunction(
                 self.config.layer_stack, frequency,
+                source_layer_name=self.config.source_layer_name,
                 backend=self.config.backend if self.config.backend != 'auto' else 'auto',
             )
             k   = complex(_gf.wavenumber)
@@ -333,6 +335,7 @@ class Simulation:
                 from .mom.operators.efie_layered import MultilayerEFIEOperator
                 _gf_op = LayeredGreensFunction(
                     self.config.layer_stack, frequency,
+                    source_layer_name=self.config.source_layer_name,
                     backend=self.config.backend if self.config.backend != 'auto' else 'auto',
                 )
                 operator = MultilayerEFIEOperator(_gf_op)

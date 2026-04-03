@@ -1024,7 +1024,8 @@ class TestCppMultilayerFillSameLayer:
         tri_twice_area = 2.0 * mesh.triangle_areas
 
         # --- Python reference Z ---
-        def corrected_smooth(r_obs, r_src):
+        def corrected_smooth_scalar(r_obs, r_src):
+            """Scalar potential smooth correction (G_phi*eps_r - g_fs_src + g_fs_src - g_fs_k0)."""
             g = sk.scalar_G_smooth(model, r_obs, r_src)
             dx = r_obs[:, 0] - r_src[:, 0]
             dy = r_obs[:, 1] - r_src[:, 1]
@@ -1032,6 +1033,21 @@ class TestCppMultilayerFillSameLayer:
             R = np.maximum(np.sqrt(dx**2 + dy**2 + dz**2), 1e-30)
             return (g + np.exp(-1j * k_slab * R) / (4 * np.pi * R)
                       - np.exp(-1j * k0 * R) / (4 * np.pi * R))
+
+        def corrected_smooth_dyadic(r_obs, r_src):
+            """Vector potential smooth correction (G_A - g_fs_src*I + g_fs_src*I - g_fs_k0*I)."""
+            ga = sk.dyadic_G_smooth(model, r_obs, r_src)  # (N, 3, 3)
+            dx = r_obs[:, 0] - r_src[:, 0]
+            dy = r_obs[:, 1] - r_src[:, 1]
+            dz = r_obs[:, 2] - r_src[:, 2]
+            R = np.maximum(np.sqrt(dx**2 + dy**2 + dz**2), 1e-30)
+            # Add back g_fs_src*I - g_fs_k0*I on diagonal
+            g_slab = np.exp(-1j * k_slab * R) / (4 * np.pi * R)
+            g_k0   = np.exp(-1j * k0 * R) / (4 * np.pi * R)
+            diff = g_slab - g_k0
+            for ii in range(3):
+                ga[:, ii, ii] += diff
+            return ga
 
         Z_py = np.zeros((N, N), dtype=np.complex128)
         for m in range(N):
@@ -1069,25 +1085,32 @@ class TestCppMultilayerFillSameLayer:
                             rgs = integrate_rho_green_singular(
                                 k0, ro, vs[0], vs[1], vs[2], rfv_s,
                                 quad_order=4, near_threshold=0.2)
-                            gc = corrected_smooth(np.tile(ro, (Q, 1)), r_src)
+                            r_obs_tiled = np.tile(ro, (Q, 1))
+                            gc_scalar = corrected_smooth_scalar(r_obs_tiled, r_src)
+                            gc_dyadic = corrected_smooth_dyadic(r_obs_tiled, r_src)  # (Q, 3, 3)
                             gs_sum = 0.0 + 0.0j
                             rgs_sm = np.zeros(3, dtype=complex)
+                            ga_corr_sum = np.zeros((3, 3), dtype=complex)
                             wr, ws = 0.0, 0.0
                             sl = []
                             for j in range(Q):
-                                R = np.linalg.norm(ro - r_src[j])
-                                if R < 1e-10:
+                                R_val = np.linalg.norm(ro - r_src[j])
+                                if R_val < 1e-10:
                                     ws += weights[j]
                                     sl.append((rho_src[j].copy(), weights[j]))
                                     continue
-                                gs_sum += weights[j] * gc[j]
+                                gs_sum += weights[j] * gc_scalar[j]
                                 wr += weights[j]
-                                rgs_sm += weights[j] * rho_src[j] * gc[j]
+                                # Vector potential: G_A_corr · rho_src
+                                ga_rho = gc_dyadic[j] @ rho_src[j]  # (3,)
+                                rgs_sm += weights[j] * ga_rho
+                                ga_corr_sum += weights[j] * gc_dyadic[j]
                             if sl and wr > 0:
-                                ga = gs_sum / wr
-                                gs_sum += ws * ga
+                                ga_scalar_avg = gs_sum / wr
+                                gs_sum += ws * ga_scalar_avg
+                                ga_dya_avg = ga_corr_sum / wr
                                 for rs, w in sl:
-                                    rgs_sm += w * rs * ga
+                                    rgs_sm += w * (ga_dya_avg @ rs)
                             g_int = gs + gs_sum * ta_s
                             rg_int = rgs + rgs_sm * ta_s
                             I_Phi += weights[i] * g_int
@@ -1252,6 +1275,8 @@ class TestCppMultilayerFillCrossLayer:
                 r_obs_tiled = np.tile(ro, (Q, 1))
                 g_smooth = np.asarray(
                     sk.scalar_G_smooth(model, r_obs_tiled, r_src), dtype=complex)
+                ga_smooth = np.asarray(
+                    sk.dyadic_G_smooth(model, r_obs_tiled, r_src), dtype=complex)
                 dx = r_obs_tiled[:, 0] - r_src[:, 0]
                 dy = r_obs_tiled[:, 1] - r_src[:, 1]
                 dz = r_obs_tiled[:, 2] - r_src[:, 2]
@@ -1263,11 +1288,19 @@ class TestCppMultilayerFillCrossLayer:
                     rgs = integrate_rho_green_singular(
                         k0, ro, vs[0], vs[1], vs[2], rfv_s,
                         quad_order=4, near_threshold=0.2)
+                    # Scalar pot correction: (G_phi*eps_r - g_fs_src) + (g_fs_src - g_fs_k0)
                     g_corr = (g_smooth
                               + np.exp(-1j * k_model_src * R) / (4 * np.pi * R)
                               - np.exp(-1j * k0 * R) / (4 * np.pi * R))
+                    # Vector pot correction: (G_A - g_fs_src*I) + (g_fs_src - g_fs_k0)*I
+                    g_src_k0_diff = (np.exp(-1j * k_model_src * R) / (4 * np.pi * R)
+                                   - np.exp(-1j * k0 * R) / (4 * np.pi * R))
+                    ga_corr = ga_smooth.copy()  # (Q, 3, 3)
+                    for ii in range(3):
+                        ga_corr[:, ii, ii] += g_src_k0_diff
                     gs_sum = 0.0 + 0.0j
                     rgs_sm = np.zeros(3, dtype=complex)
+                    ga_corr_sum = np.zeros((3, 3), dtype=complex)
                     w_reg, w_sing = 0.0, 0.0
                     sing_rho = []
                     for j in range(Q):
@@ -1278,18 +1311,29 @@ class TestCppMultilayerFillCrossLayer:
                             continue
                         gs_sum += weights[j] * g_corr[j]
                         w_reg += weights[j]
-                        rgs_sm += weights[j] * rho_src[j] * g_corr[j]
+                        # Vector potential: G_A_corr · rho_src
+                        ga_rho = ga_corr[j] @ rho_src[j]
+                        rgs_sm += weights[j] * ga_rho
+                        ga_corr_sum += weights[j] * ga_corr[j]
                     if sing_rho and w_reg > 0:
-                        ga = gs_sum / w_reg
-                        gs_sum += w_sing * ga
+                        ga_scalar_avg = gs_sum / w_reg
+                        gs_sum += w_sing * ga_scalar_avg
+                        ga_dya_avg = ga_corr_sum / w_reg
                         for rs, w in sing_rho:
-                            rgs_sm += w * rs * ga
+                            rgs_sm += w * (ga_dya_avg @ rs)
                     g_int = gs + gs_sum * ta_s
                     rg_int = rgs + rgs_sm * ta_s
                 else:
-                    g_ml = g_smooth + np.exp(-1j * k_model_src * R) / (4 * np.pi * R)
+                    # Cross-layer: full G_phi*eps_r and full G_A
+                    g_fs_src = np.exp(-1j * k_model_src * R) / (4 * np.pi * R)
+                    g_ml = g_smooth + g_fs_src
                     g_int = np.dot(weights, g_ml) * ta_s
-                    rg_int = np.einsum('j,ji,j->i', weights, rho_src, g_ml) * ta_s
+                    # Full G_A = ga_smooth + g_fs_src * I
+                    ga_full = ga_smooth.copy()
+                    for ii in range(3):
+                        ga_full[:, ii, ii] += g_fs_src
+                    ga_dot_rho = np.einsum('jik,jk->ji', ga_full, rho_src)
+                    rg_int = np.einsum('j,ji->i', weights, ga_dot_rho) * ta_s
                 I_Phi += weights[i] * g_int
                 I_A += weights[i] * np.dot(rho_t, rg_int)
             I_Phi *= ta_t
