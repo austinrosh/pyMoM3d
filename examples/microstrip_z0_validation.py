@@ -14,8 +14,8 @@ Physical setup:
 LayerStack (bottom to top):
   PEC half-space (is_pec=True)
   FR4  (z=0 to z=h, eps_r=4.4)
-  Phantom air (z=h to z=h+delta, eps_r=1.001)
   Air half-space
+  Strip placed at FR4/air interface (z=h)
 
 Validation:
   1. Multilayer shifts resonance downward: eps_eff from resonance shift
@@ -52,7 +52,7 @@ from pyMoM3d import (
     Layer, LayerStack, configure_latex_style, c0,
     microstrip_z0_hammerstad,
 )
-from pyMoM3d.mom.excitation import StripDeltaGapExcitation, find_feed_edges
+from pyMoM3d.mom.excitation import StripDeltaGapExcitation, find_feed_edges, compute_feed_signs
 
 configure_latex_style()
 
@@ -68,7 +68,6 @@ EPS_R    = 4.4          # FR4 relative permittivity
 H_SUB    = 1.6e-3       # Substrate height (m)
 W_STRIP  = 3.06e-3      # Strip width (m) — approx 50 Ohm on FR4 1.6mm
 L_STRIP  = 50.0e-3      # Strip length (m) — ~lambda/2 at resonance
-DELTA    = 0.1e-3       # Phantom air layer thickness (m)
 
 # Mesh
 TEL = 2.0e-3
@@ -85,8 +84,7 @@ def build_layer_stack():
     return LayerStack([
         Layer('pec_ground', z_bot=-np.inf, z_top=0.0, eps_r=1.0, is_pec=True),
         Layer('FR4',        z_bot=0.0,     z_top=H_SUB, eps_r=EPS_R),
-        Layer('phantom',    z_bot=H_SUB,   z_top=H_SUB + DELTA, eps_r=1.001),
-        Layer('air',        z_bot=H_SUB + DELTA, z_top=np.inf, eps_r=1.0),
+        Layer('air',        z_bot=H_SUB,   z_top=np.inf, eps_r=1.0),
     ])
 
 
@@ -120,14 +118,15 @@ def main():
     # Mesh — strip at z=H for multilayer, z=0 for free-space
     mesher = GmshMesher(target_edge_length=TEL)
 
-    # Place mesh inside the phantom layer (NOT at the FR4/phantom boundary)
-    z_mesh = H_SUB + DELTA / 2.0
+    # Place strip at FR4/air interface
+    z_mesh = H_SUB
     mesh_ml = mesher.mesh_plate_with_feed(
         width=L_STRIP, height=W_STRIP, feed_x=0.0,
         center=(0.0, 0.0, z_mesh),
     )
     basis_ml = compute_rwg_connectivity(mesh_ml)
     feed_ml = find_feed_edges(mesh_ml, basis_ml, feed_x=0.0)
+    signs_ml = compute_feed_signs(mesh_ml, basis_ml, feed_ml)
 
     mesh_fs = mesher.mesh_plate_with_feed(
         width=L_STRIP, height=W_STRIP, feed_x=0.0,
@@ -135,6 +134,7 @@ def main():
     )
     basis_fs = compute_rwg_connectivity(mesh_fs)
     feed_fs = find_feed_edges(mesh_fs, basis_fs, feed_x=0.0)
+    signs_fs = compute_feed_signs(mesh_fs, basis_fs, feed_fs)
 
     stats = mesh_ml.get_statistics()
     print(f"\nMesh: {stats['num_triangles']} triangles, "
@@ -142,8 +142,10 @@ def main():
           f"mean edge {stats['mean_edge_length']*1e3:.2f} mm")
     print(f"Feed edges: {len(feed_ml)}")
 
-    exc_ml = StripDeltaGapExcitation(feed_basis_indices=feed_ml, voltage=1.0)
-    exc_fs = StripDeltaGapExcitation(feed_basis_indices=feed_fs, voltage=1.0)
+    exc_ml = StripDeltaGapExcitation(feed_basis_indices=feed_ml, voltage=1.0,
+                                     feed_signs=signs_ml)
+    exc_fs = StripDeltaGapExcitation(feed_basis_indices=feed_fs, voltage=1.0,
+                                     feed_signs=signs_fs)
 
     # Frequency sweep
     Z_fs_arr = []
@@ -169,7 +171,7 @@ def main():
         cfg_ml = SimulationConfig(
             frequency=freq, excitation=exc_ml,
             quad_order=4, backend='auto',
-            layer_stack=stack, source_layer_name='phantom',
+            layer_stack=stack, source_layer_name='FR4',
         )
         sim_ml = Simulation(cfg_ml, mesh=mesh_ml, reporter=SilentReporter())
         r_ml = sim_ml.run()

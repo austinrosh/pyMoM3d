@@ -15,7 +15,6 @@ from typing import List, Optional
 from .mesh.mesh_data import Mesh
 from .mesh.rwg_basis import RWGBasis
 from .mesh.rwg_connectivity import compute_rwg_connectivity
-from .mom.impedance import fill_impedance_matrix
 from .mom.assembly import fill_matrix
 from .mom.operators import EFIEOperator, MFIEOperator, CFIEOperator
 from .mom.excitation import Excitation, PlaneWaveExcitation
@@ -58,6 +57,7 @@ class SimulationConfig:
     report_dir: str = 'results/simulation_info'
     layer_stack: Optional['LayerStack'] = None
     source_layer_name: Optional[str] = None
+    gf_backend: str = 'auto'
 
 
 @dataclass
@@ -295,7 +295,7 @@ class Simulation:
             _gf = LayeredGreensFunction(
                 self.config.layer_stack, frequency,
                 source_layer_name=self.config.source_layer_name,
-                backend=self.config.backend if self.config.backend != 'auto' else 'auto',
+                backend=self.config.gf_backend,
             )
             k   = complex(_gf.wavenumber)
             eta = complex(_gf.wave_impedance)
@@ -336,7 +336,7 @@ class Simulation:
                 _gf_op = LayeredGreensFunction(
                     self.config.layer_stack, frequency,
                     source_layer_name=self.config.source_layer_name,
-                    backend=self.config.backend if self.config.backend != 'auto' else 'auto',
+                    backend=self.config.gf_backend,
                 )
                 operator = MultilayerEFIEOperator(_gf_op)
             elif formulation == 'EFIE':

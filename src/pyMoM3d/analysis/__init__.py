@@ -7,6 +7,8 @@ from .pattern_analysis import compute_directivity, compute_beamwidth_3dB
 from .transmission_line import (
     microstrip_z0_hammerstad,
     stripline_z0_cohn,
+    patch_antenna_cavity_model,
+    cpw_z0_conformal,
     s_to_abcd,
     extract_propagation_constant,
     extract_z0_from_s,
@@ -36,6 +38,8 @@ __all__ = [
     's_to_abcd',
     'extract_propagation_constant',
     'extract_z0_from_s',
+    'patch_antenna_cavity_model',
+    'cpw_z0_conformal',
     # Inductor — Z-based
     'wheeler_inductance',
     'quality_factor',

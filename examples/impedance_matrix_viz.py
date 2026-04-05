@@ -25,7 +25,8 @@ import matplotlib.ticker as ticker
 from pyMoM3d import (
     GmshMesher,
     compute_rwg_connectivity,
-    fill_impedance_matrix,
+    fill_matrix,
+    EFIEOperator,
     configure_latex_style,
     eta0,
     c0,
@@ -73,7 +74,7 @@ print(f"\nFrequency : {freq/1e9:.2f} GHz   lambda = {lam*100:.1f} cm")
 print(f"h/lambda  : {target_edge_length/lam:.3f}")
 print("Filling Z matrix ...")
 
-Z = fill_impedance_matrix(basis, mesh, k, eta0, quad_order=4)
+Z = fill_matrix(EFIEOperator(), basis, mesh, k, eta0, quad_order=4)
 
 sv = np.linalg.svd(Z, compute_uv=False)
 print(f"Z shape   : {Z.shape}   dtype = {Z.dtype}")

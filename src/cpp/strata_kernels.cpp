@@ -46,6 +46,7 @@
 
 #include "MGF.hpp"
 #include "layers.hpp"
+#include "utility.hpp"      // strata::linspace for interpolation grid
 #include "singularity.hpp"  // Graglia singularity extraction (header-only)
 
 namespace py = pybind11;
@@ -153,9 +154,14 @@ public:
  *                               effective relative permittivity.  Strata's G_phi
  *                               returns g/ε_r (Formulation-C convention); we
  *                               multiply by ε_r before subtracting g_fs.
- * method    : "dcim"       → MGF_DCIM (default, fast precomputed images)
- *             "integrate"  → MGF_INTEGRATE (exact, slow, useful for validation)
- *             "quasistatic"→ MGF_QUASISTATIC
+ * method    : "dcim"         → MGF_DCIM (default, fast precomputed images)
+ *             "interpolate"  → MGF_INTERPOLATE (tabulated Sommerfeld, SW-aware)
+ *             "integrate"    → MGF_INTEGRATE (exact per-point Sommerfeld, slow)
+ *             "quasistatic"  → MGF_QUASISTATIC
+ * rho_max   : maximum horizontal distance (m) for the interpolation table.
+ *             Only used when method = "interpolate".  Set to the maximum
+ *             pairwise distance in the mesh (Python side computes this).
+ *             Default 0.0 → auto-select 10 wavelengths.
  */
 StrataModel make_model(
     const std::vector<std::array<double, 7>>& layers,
@@ -165,7 +171,9 @@ StrataModel make_model(
     double z_src, double z_obs,
     double k_src_re, double k_src_im,
     double eps_r_src_re, double eps_r_src_im,
-    const std::string& method = "dcim"
+    const std::string& method = "dcim",
+    double rho_max = 0.0,
+    const std::vector<double>& extra_z_nodes = {}
 ) {
     // ── Build LayerManager ──────────────────────────────────────────────────
     LayerManager lm;
@@ -187,9 +195,18 @@ StrataModel make_model(
 
     // Register source/observation z-coordinates so Strata can set up the
     // spectral sampling grid for DCIM image generation.
+    // Additional z-nodes ensure accurate DCIM fitting across the full
+    // layer thickness (critical for meshes spanning multiple z-heights).
     std::vector<double> z_nodes = {z_src};
     if (std::abs(z_obs - z_src) > 1e-15)
         z_nodes.push_back(z_obs);
+    for (double zn : extra_z_nodes) {
+        // Only add if not a duplicate
+        bool dup = false;
+        for (double existing : z_nodes)
+            if (std::abs(zn - existing) < 1e-15) { dup = true; break; }
+        if (!dup) z_nodes.push_back(zn);
+    }
     lm.InsertNodes_z(z_nodes);
 
     // ── MGF settings ───────────────────────────────────────────────────────
@@ -199,11 +216,45 @@ StrataModel make_model(
         s.method = MGF_INTEGRATE;
     else if (method == "quasistatic")
         s.method = MGF_QUASISTATIC;
+    else if (method == "interpolate")
+        s.method = MGF_INTERPOLATE;   // tabulated + interpolated (captures SW poles)
     else
         s.method = MGF_DCIM;          // default: DCIM — production speed
 
     s.extract_singularities = false;  // we subtract G_fs analytically below
     s.verbose               = false;  // suppress Strata stdout logging
+
+    // ── Interpolation grid setup ───────────────────────────────────────────
+    // For MGF_INTERPOLATE: set up rho sampling nodes that cover the range
+    // of horizontal distances in the mesh.  The table is built during
+    // Initialize() using direct Sommerfeld integration, which correctly
+    // captures surface wave poles.
+    if (s.method == MGF_INTERPOLATE) {
+        s.extract_quasistatic = true;   // extract QS for accuracy near R→0
+        s.order = 3;                    // Lagrange interpolation order
+
+        // Compute wavelength in the densest medium for sampling density
+        double eps_max = std::max(1.0, eps_r_src_re);
+        double lambda_min = (3.0e8 / frequency) / std::sqrt(eps_max);
+
+        // Default rho_max: 10 wavelengths if not specified
+        if (rho_max <= 0.0)
+            rho_max = 10.0 * lambda_min;
+
+        // Sampling density: N_lambda samples per wavelength
+        double N_lambda = 10.0;
+        int N_rho = std::max(20, static_cast<int>(
+            N_lambda * rho_max / lambda_min + 0.5));
+        N_rho = std::min(N_rho, 2000);   // cap to avoid excessive memory
+
+        // Build uniform rho grid from small offset (avoid rho=0) to rho_max
+        std::vector<double> rho_nodes;
+        double rho_min = lambda_min * 0.01;  // small offset
+        strata::linspace(rho_min, rho_max, N_rho, rho_nodes);
+
+        lm.ClearNodes_rho();
+        lm.InsertNodes_rho(rho_nodes);
+    }
 
     // ── Initialise and configure MGF ────────────────────────────────────────
     StrataModel model;
@@ -976,6 +1027,8 @@ PYBIND11_MODULE(strata_kernels, m) {
         py::arg("k_src_re"), py::arg("k_src_im"),
         py::arg("eps_r_src_re"), py::arg("eps_r_src_im"),
         py::arg("method") = "dcim",
+        py::arg("rho_max") = 0.0,
+        py::arg("extra_z_nodes") = std::vector<double>{},
         R"doc(
 Build a StrataModel from layer parameters.
 
@@ -1001,6 +1054,9 @@ eps_r_src_re, eps_r_src_im : float
     multiply by ε_r before subtracting g_fs.
 method : str
     'dcim' (default), 'integrate', or 'quasistatic'.
+extra_z_nodes : list of float
+    Additional z-coordinates for DCIM fitting grid. Ensures accurate
+    Green's function evaluation at z-heights beyond z_src/z_obs.
 )doc");
 
     m.def("scalar_G_smooth", &scalar_G_smooth,

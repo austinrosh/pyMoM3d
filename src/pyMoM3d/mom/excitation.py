@@ -177,6 +177,7 @@ def find_feed_edges(
     rwg_basis: RWGBasis,
     feed_x: float,
     tol: float = None,
+    y_range: tuple = None,
 ) -> list:
     """Find all interior basis functions whose shared edge crosses x=feed_x transversely.
 
@@ -192,6 +193,11 @@ def find_feed_edges(
         x-coordinate of the feed line.
     tol : float, optional
         Positional tolerance. Defaults to half the minimum edge length.
+    y_range : tuple of (float, float), optional
+        If provided, only edges whose midpoint y-coordinate falls within
+        ``(y_min, y_max)`` are returned.  Useful for multi-conductor
+        geometries (e.g. CPW) where multiple conductors share the same
+        feed x-coordinate.
 
     Returns
     -------
@@ -212,11 +218,18 @@ def find_feed_edges(
         e = mesh.edges[rwg_basis.edge_index[n]]
         va = mesh.vertices[e[0]]
         vb = mesh.vertices[e[1]]
-        mid_x = 0.5 * (va[0] + vb[0])
 
-        # Edge midpoint must be near the feed line
-        if abs(mid_x - feed_x) > tol:
+        # Both vertices must be near the feed line x-coordinate.
+        # This ensures the edge lies ON the feed line (conformal mesh),
+        # rejecting diagonal edges that merely pass near it.
+        if abs(va[0] - feed_x) > tol or abs(vb[0] - feed_x) > tol:
             continue
+
+        # Optional y-range filter
+        if y_range is not None:
+            mid_y = 0.5 * (va[1] + vb[1])
+            if mid_y < y_range[0] or mid_y > y_range[1]:
+                continue
 
         # Edge must be approximately transverse (y-directed)
         edge_dir = vb - va
@@ -230,6 +243,157 @@ def find_feed_edges(
             indices.append(n)
 
     return indices
+
+
+def find_edge_port_feed_edges(
+    mesh: Mesh,
+    rwg_basis: RWGBasis,
+    port_x: float,
+    strip_z: float,
+    tol: float = None,
+) -> list:
+    """Find RWG basis functions at the strip-plate junction for edge ports.
+
+    Selects interior edges at x = port_x where both edge vertices are at
+    z = strip_z (the junction between the horizontal strip and vertical
+    plate).  These junction edges have one triangle on the strip and one
+    on the plate, so the RWG basis function spans the junction.
+
+    Parameters
+    ----------
+    mesh : Mesh
+    rwg_basis : RWGBasis
+    port_x : float
+        x-coordinate of the port edge (strip end).
+    strip_z : float
+        z-coordinate of the strip surface (top of the vertical plate).
+    tol : float, optional
+        Positional tolerance.  Defaults to half the minimum edge length.
+
+    Returns
+    -------
+    indices : list of int
+        Basis function indices for junction edges.
+    """
+    if tol is None:
+        lengths = []
+        for n in range(min(rwg_basis.num_basis, 50)):
+            e = mesh.edges[rwg_basis.edge_index[n]]
+            lengths.append(np.linalg.norm(
+                mesh.vertices[e[1]] - mesh.vertices[e[0]]))
+        tol = 0.5 * min(lengths) if lengths else 1e-6
+
+    indices = []
+    for n in range(rwg_basis.num_basis):
+        e = mesh.edges[rwg_basis.edge_index[n]]
+        va = mesh.vertices[e[0]]
+        vb = mesh.vertices[e[1]]
+
+        # Both vertices must be at x = port_x and z = strip_z
+        if abs(va[0] - port_x) > tol or abs(vb[0] - port_x) > tol:
+            continue
+        if abs(va[2] - strip_z) > tol or abs(vb[2] - strip_z) > tol:
+            continue
+
+        # Edge must be approximately y-directed
+        edge_dir = vb - va
+        edge_len = np.linalg.norm(edge_dir)
+        if edge_len < 1e-30:
+            continue
+        edge_dir /= edge_len
+        if abs(edge_dir[1]) > abs(edge_dir[0]):
+            indices.append(n)
+
+    return indices
+
+
+def compute_feed_signs(
+    mesh: Mesh,
+    rwg_basis: RWGBasis,
+    feed_basis_indices: list,
+) -> list:
+    """Compute RWG orientation signs for feed edges relative to +x.
+
+    For each feed edge, determines whether the RWG basis function current
+    flows in the +x direction (+1) or -x direction (-1) at the shared edge.
+    These signs must be applied to both the excitation vector and the terminal
+    current measurement for correct port extraction.
+
+    The RWG current at the shared edge flows from free_vertex_plus toward
+    free_vertex_minus.  The sign is +1 if this direction has a positive
+    x-component, -1 otherwise.
+
+    Parameters
+    ----------
+    mesh : Mesh
+    rwg_basis : RWGBasis
+    feed_basis_indices : list of int
+        Basis function indices (from ``find_feed_edges``).
+
+    Returns
+    -------
+    signs : list of int
+        Per-edge sign (+1 or -1), same length as ``feed_basis_indices``.
+    """
+    signs = []
+    for n in feed_basis_indices:
+        edge_idx = rwg_basis.edge_index[n]
+        e = mesh.edges[edge_idx]
+        mid_x = 0.5 * (mesh.vertices[e[0], 0] + mesh.vertices[e[1], 0])
+        fvp_x = mesh.vertices[rwg_basis.free_vertex_plus[n], 0]
+        # Current on T+ flows away from free_vertex_plus toward the edge.
+        # If edge midpoint is to the right of free_vertex_plus, current is +x.
+        signs.append(+1 if mid_x > fvp_x else -1)
+    return signs
+
+
+def compute_feed_signs_along_direction(
+    mesh: Mesh,
+    rwg_basis: RWGBasis,
+    feed_basis_indices: list,
+    direction: np.ndarray,
+) -> list:
+    """Compute RWG orientation signs relative to an arbitrary direction.
+
+    Generalization of ``compute_feed_signs`` for feed edges that are not
+    aligned with the x-axis.  Supports full 3D direction vectors, which
+    is required for edge port junction edges where the current flows
+    vertically (z-direction) from the port plate to the strip.
+
+    Parameters
+    ----------
+    mesh : Mesh
+    rwg_basis : RWGBasis
+    feed_basis_indices : list of int
+        Basis function indices (from ``find_feed_edges`` or similar).
+    direction : ndarray, shape (2,) or (3,)
+        Reference current direction vector (need not be normalized).
+        All provided components are used.
+
+    Returns
+    -------
+    signs : list of int
+        Per-edge sign (+1 or -1), same length as ``feed_basis_indices``.
+    """
+    d = np.asarray(direction, dtype=np.float64).ravel()
+    if len(d) < 2:
+        raise ValueError("direction must have at least 2 components")
+    d_norm = np.linalg.norm(d)
+    if d_norm < 1e-30:
+        raise ValueError("direction vector has zero magnitude")
+    d = d / d_norm
+    ndim = len(d)
+
+    signs = []
+    for n in feed_basis_indices:
+        edge_idx = rwg_basis.edge_index[n]
+        e = mesh.edges[edge_idx]
+        mid = 0.5 * (mesh.vertices[e[0], :ndim] + mesh.vertices[e[1], :ndim])
+        fvp = mesh.vertices[rwg_basis.free_vertex_plus[n], :ndim]
+        # Current on T+ flows from free_vertex_plus toward the edge midpoint.
+        flow_dir = mid - fvp
+        signs.append(+1 if np.dot(flow_dir, d) > 0 else -1)
+    return signs
 
 
 class StripDeltaGapExcitation(Excitation):
@@ -249,9 +413,11 @@ class StripDeltaGapExcitation(Excitation):
         Applied voltage (V).
     """
 
-    def __init__(self, feed_basis_indices: list, voltage: complex = 1.0):
+    def __init__(self, feed_basis_indices: list, voltage: complex = 1.0,
+                 feed_signs: list = None):
         self.feed_basis_indices = list(feed_basis_indices)
         self.voltage = complex(voltage)
+        self.feed_signs = feed_signs if feed_signs is not None else [1] * len(self.feed_basis_indices)
 
     def compute_voltage_vector(
         self, rwg_basis: RWGBasis, mesh: Mesh, k: float
@@ -267,9 +433,9 @@ class StripDeltaGapExcitation(Excitation):
         """
         N = rwg_basis.num_basis
         V = np.zeros(N, dtype=np.complex128)
-        for idx in self.feed_basis_indices:
+        for i, idx in enumerate(self.feed_basis_indices):
             if 0 <= idx < N:
-                V[idx] = self.voltage * rwg_basis.edge_length[idx]
+                V[idx] = self.feed_signs[i] * self.voltage * rwg_basis.edge_length[idx]
         return V
 
     def compute_input_impedance(
@@ -299,8 +465,8 @@ class StripDeltaGapExcitation(Excitation):
         Z_in : complex
         """
         I_terminal = 0.0 + 0.0j
-        for idx in self.feed_basis_indices:
-            I_terminal += I_coeffs[idx] * rwg_basis.edge_length[idx]
+        for i, idx in enumerate(self.feed_basis_indices):
+            I_terminal += self.feed_signs[i] * I_coeffs[idx] * rwg_basis.edge_length[idx]
 
         if abs(I_terminal) < 1e-30:
             return np.inf + 0j

@@ -6,7 +6,8 @@ from typing import List, Tuple
 from ..mesh.mesh_data import Mesh
 from ..mesh.gmsh_mesher import GmshMesher
 from ..mesh.rwg_connectivity import compute_rwg_connectivity
-from ..mom.impedance import fill_impedance_matrix
+from ..mom.assembly import fill_matrix
+from ..mom.operators import EFIEOperator
 from ..mom.excitation import PlaneWaveExcitation
 from ..mom.solver import solve_direct
 from ..fields.far_field import compute_far_field
@@ -55,7 +56,7 @@ def mesh_convergence_study(
         mesh = GmshMesher(target_edge_length=tel).mesh_from_geometry(geometry)
         basis = compute_rwg_connectivity(mesh)
 
-        Z = fill_impedance_matrix(basis, mesh, k, eta0, quad_order=quad_order)
+        Z = fill_matrix(EFIEOperator(), basis, mesh, k, eta0, quad_order=quad_order)
         V = exc.compute_voltage_vector(basis, mesh, k)
         I = solve_direct(Z, V)
 

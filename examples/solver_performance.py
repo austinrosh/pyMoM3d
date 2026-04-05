@@ -26,7 +26,8 @@ from pyMoM3d import (
     eta0,
 )
 from pyMoM3d.mesh.rwg_basis import RWGBasis
-from pyMoM3d.mom.impedance import fill_impedance_matrix
+from pyMoM3d.mom.assembly import fill_matrix
+from pyMoM3d.mom.operators import EFIEOperator
 from pyMoM3d.mom.solver import solve_direct, solve_gmres
 
 
@@ -69,8 +70,8 @@ def timed_mesh(edge_len, radius):
 def timed_fill(basis, mesh, k, eta):
     """Fill impedance matrix, returning Z and timing."""
     t0 = time.monotonic()
-    Z = fill_impedance_matrix(
-        basis, mesh, k, eta,
+    Z = fill_matrix(
+        EFIEOperator(), basis, mesh, k, eta,
         quad_order=QUAD_ORDER,
         near_threshold=NEAR_THRESHOLD,
         progress_callback=None,

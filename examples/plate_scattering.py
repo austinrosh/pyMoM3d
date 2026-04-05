@@ -20,7 +20,8 @@ from pyMoM3d import (
     RectangularPlate,
     GmshMesher,
     compute_rwg_connectivity,
-    fill_impedance_matrix,
+    fill_matrix,
+    EFIEOperator,
     PlaneWaveExcitation,
     solve_direct,
     plot_surface_current,
@@ -71,7 +72,7 @@ def main():
 
     # --- Solve ---
     print("\n--- Impedance matrix fill ---")
-    Z = fill_impedance_matrix(basis, mesh, k, eta0, quad_order=4)
+    Z = fill_matrix(EFIEOperator(), basis, mesh, k, eta0, quad_order=4)
     print(f"Z shape:      {Z.shape}")
     print(f"Cond(Z):      {np.linalg.cond(Z):.2e}")
 

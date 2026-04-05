@@ -45,9 +45,9 @@ from pyMoM3d import (
     Port, NetworkExtractor,
     Layer, LayerStack,
     configure_latex_style, c0,
-    stripline_z0_cohn, extract_z0_from_s,
+    stripline_z0_cohn, extract_z0_from_s, extract_propagation_constant,
 )
-from pyMoM3d.mom.excitation import StripDeltaGapExcitation
+from pyMoM3d.mom.excitation import StripDeltaGapExcitation, find_feed_edges, compute_feed_signs
 
 configure_latex_style()
 
@@ -81,7 +81,14 @@ FREQS     = FREQS_GHZ * 1e9
 # ---------------------------------------------------------------------------
 
 def build_layer_stack():
-    """Build the stripline layer stack with dual PEC half-spaces."""
+    """Build the stripline layer stack with dual PEC half-spaces.
+
+    Unlike microstrip/CPW (where the strip sits at the dielectric/air
+    interface and needs no phantom), stripline has the strip *embedded*
+    inside homogeneous dielectric.  A thin phantom layer with eps_r
+    slightly different from the bulk is required so that the Strata
+    backend treats the source plane as a layer boundary.
+    """
     return LayerStack([
         Layer('pec_bot',  z_bot=-np.inf,           z_top=0.0, eps_r=1.0, is_pec=True),
         Layer('diel_lo',  z_bot=0.0,               z_top=Z_STRIP - DELTA, eps_r=EPS_R),
@@ -149,7 +156,6 @@ def main():
     print(f"  Port separation = {L_port*1e3:.1f} mm")
 
     # --- Port definition ---
-    from pyMoM3d.mom.excitation import find_feed_edges
     feed1 = find_feed_edges(mesh, basis, feed_x=port1_x)
     feed2 = find_feed_edges(mesh, basis, feed_x=port2_x)
     print(f"  Port 1 feed edges: {len(feed1)}")
@@ -159,8 +165,10 @@ def main():
         print("ERROR: Could not find feed edges at port locations.")
         return
 
-    port1 = Port(name='P1', feed_basis_indices=feed1)
-    port2 = Port(name='P2', feed_basis_indices=feed2)
+    signs1 = compute_feed_signs(mesh, basis, feed1)
+    signs2 = compute_feed_signs(mesh, basis, feed2)
+    port1 = Port(name='P1', feed_basis_indices=feed1, feed_signs=signs1)
+    port2 = Port(name='P2', feed_basis_indices=feed2, feed_signs=signs2)
 
     # --- Build Simulation ---
     exc_dummy = StripDeltaGapExcitation(feed_basis_indices=feed1, voltage=1.0)
@@ -181,33 +189,43 @@ def main():
 
     results = extractor.extract(FREQS.tolist())
 
-    # --- Extract Z0 from S-parameters ---
+    # --- Extract Z0 and eps_eff from S-parameters ---
     Z0_mom = []
+    eps_eff_mom = []
 
     print(f"\n  {'f (GHz)':>8}  {'Z0 (Ohm)':>10}  {'Z0_err (%)':>10}  "
-          f"{'|S21| (dB)':>10}")
-    print("  " + "-" * 45)
+          f"{'eps_eff':>8}  {'|S21| (dB)':>10}")
+    print("  " + "-" * 55)
 
     for freq, result in zip(FREQS, results):
         S = result.S_matrix
         z0_ext = extract_z0_from_s(S, Z0_ref=50.0)
+        gamma = extract_propagation_constant(S, L_port, Z0_ref=50.0)
+        k0 = 2.0 * np.pi * freq / c0
+        ee = (gamma.imag / k0)**2 if k0 > 0 else float('nan')
         s21_dB = 20.0 * np.log10(max(abs(S[1, 0]), 1e-12))
 
         Z0_mom.append(abs(z0_ext))
+        eps_eff_mom.append(ee)
         z0_err = abs(abs(z0_ext) - Z0_ana) / Z0_ana * 100
 
         print(f"  {freq/1e9:>8.2f}  {abs(z0_ext):>10.2f}  {z0_err:>10.1f}  "
-              f"{s21_dB:>10.2f}")
+              f"{ee:>8.3f}  {s21_dB:>10.2f}")
 
     Z0_mom = np.array(Z0_mom)
+    eps_eff_mom = np.array(eps_eff_mom)
 
     # --- Summary ---
     mean_z0_err = np.mean(np.abs(Z0_mom - Z0_ana) / Z0_ana * 100)
     z0_std = np.std(Z0_mom)
+    mean_ee = np.mean(eps_eff_mom)
+    ee_err = abs(mean_ee - EPS_R) / EPS_R * 100
     print(f"\n  Mean Z0 error:  {mean_z0_err:.1f}%  "
           f"{'PASS' if mean_z0_err < 15 else 'CHECK'}")
     print(f"  Z0 std dev:     {z0_std:.2f} Ohm  "
           f"(frequency independence: {'PASS' if z0_std < 5 else 'CHECK'})")
+    print(f"  Mean eps_eff:   {mean_ee:.3f}  "
+          f"(expected {EPS_R:.1f} for TEM, error {ee_err:.1f}%)")
 
     # --- Plot ---
     fig, ax = plt.subplots(1, 1, figsize=(8, 5))

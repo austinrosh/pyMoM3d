@@ -1,8 +1,8 @@
-"""Transmission line analysis utilities for multilayer benchmark validation.
+"""Transmission line and patch antenna analysis utilities.
 
-Provides analytical formulas for microstrip and stripline characteristic
-impedance, plus S-parameter-based extraction of propagation constant and
-characteristic impedance from 2-port MoM results.
+Provides analytical formulas for microstrip, stripline, and CPW characteristic
+impedance, patch antenna cavity model, plus S-parameter-based extraction of
+propagation constant and characteristic impedance from 2-port MoM results.
 """
 
 from __future__ import annotations
@@ -84,12 +84,125 @@ def stripline_z0_cohn(W: float, b: float, eps_r: float) -> float:
     """
     from scipy.special import ellipk
 
-    # Cohn formula: k = sech(π W / (2b)), Z0 = (30π/√ε_r) K(k')/K(k)
+    # Cohn formula: k = sech(π W / (2b)), Z0 = (30π/√ε_r) K(k²)/K(k'²)
     k = 1.0 / np.cosh(np.pi * W / (2.0 * b))
     kp = np.sqrt(1.0 - k**2)
-    Z0 = (30.0 * np.pi / np.sqrt(eps_r)) * (ellipk(kp**2) / ellipk(k**2))
+    Z0 = (30.0 * np.pi / np.sqrt(eps_r)) * (ellipk(k**2) / ellipk(kp**2))
 
     return float(Z0)
+
+
+def patch_antenna_cavity_model(
+    W: float, L: float, h: float, eps_r: float,
+) -> tuple:
+    """Rectangular patch antenna cavity model predictions.
+
+    Uses the Hammerstad effective permittivity and fringing extension
+    to predict the TM010 resonant frequency, and the Balanis approximation
+    for edge input resistance.
+
+    Parameters
+    ----------
+    W : float
+        Patch width (m) — the radiating dimension.
+    L : float
+        Patch length (m) — the resonant dimension.
+    h : float
+        Substrate height (m).
+    eps_r : float
+        Substrate relative permittivity.
+
+    Returns
+    -------
+    f_res : float
+        Resonant frequency of the TM010 mode (Hz).
+    R_in_edge : float
+        Edge input resistance at resonance (Ohm), approximate.
+    eps_eff : float
+        Effective permittivity used in the calculation.
+    delta_L : float
+        Fringing extension (m).
+
+    References
+    ----------
+    C. A. Balanis, "Antenna Theory: Analysis and Design," 4th ed.,
+    Wiley, 2016, Ch. 14.
+    """
+    from ..utils.constants import c0
+
+    _, eps_eff = microstrip_z0_hammerstad(W, h, eps_r)
+
+    # Fringing extension (Hammerstad)
+    delta_L = 0.412 * h * (
+        (eps_eff + 0.3) * (W / h + 0.264)
+        / ((eps_eff - 0.258) * (W / h + 0.8))
+    )
+
+    # TM010 resonant frequency
+    f_res = c0 / (2.0 * (L + 2.0 * delta_L) * np.sqrt(eps_eff))
+
+    # Edge input resistance (Balanis approximation)
+    R_in_edge = 90.0 * eps_r**2 / (eps_r - 1.0) * (L / W)**2
+
+    return float(f_res), float(R_in_edge), float(eps_eff), float(delta_L)
+
+
+def cpw_z0_conformal(
+    W: float, S: float, eps_r: float, h: float,
+) -> tuple:
+    """CPW characteristic impedance via conformal mapping.
+
+    Computes the quasi-static characteristic impedance and effective
+    permittivity for a coplanar waveguide on a substrate of finite
+    thickness h, backed by a PEC ground plane.
+
+    Parameters
+    ----------
+    W : float
+        Center conductor width (m).
+    S : float
+        Gap between center conductor and each ground plane (m).
+    eps_r : float
+        Substrate relative permittivity.
+    h : float
+        Substrate thickness (m).
+
+    Returns
+    -------
+    Z0 : float
+        Characteristic impedance (Ohm).
+    eps_eff : float
+        Effective permittivity.
+
+    References
+    ----------
+    R. N. Simons, "Coplanar Waveguide Circuits, Components, and Systems,"
+    Wiley, 2001, Ch. 2.
+    """
+    from scipy.special import ellipk
+
+    # Air-space elliptic modulus
+    k0 = W / (W + 2.0 * S)
+    k0p = np.sqrt(1.0 - k0**2)
+
+    # Substrate-modified elliptic modulus (finite thickness h + PEC backing)
+    k1 = np.sinh(np.pi * W / (4.0 * h)) / np.sinh(
+        np.pi * (W + 2.0 * S) / (4.0 * h)
+    )
+    k1p = np.sqrt(1.0 - k1**2)
+
+    # Effective permittivity
+    K_k0 = ellipk(k0**2)
+    K_k0p = ellipk(k0p**2)
+    K_k1 = ellipk(k1**2)
+    K_k1p = ellipk(k1p**2)
+
+    eps_eff = 1.0 + (eps_r - 1.0) / 2.0 * (K_k1 / K_k1p) * (K_k0p / K_k0)
+
+    # Characteristic impedance
+    Z0 = 30.0 * np.pi / np.sqrt(eps_eff) * (K_k0p / K_k0)
+
+    return float(Z0), float(eps_eff)
 
 
 # ------------------------------------------------------------------

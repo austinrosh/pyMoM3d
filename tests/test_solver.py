@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 
 from pyMoM3d.mesh import Mesh, compute_rwg_connectivity
-from pyMoM3d.mom.impedance import fill_impedance_matrix
+from pyMoM3d.mom.assembly import fill_matrix
+from pyMoM3d.mom.operators import EFIEOperator
 from pyMoM3d.mom.excitation import PlaneWaveExcitation, DeltaGapExcitation, find_nearest_edge
 from pyMoM3d.mom.solver import solve_direct, solve_gmres
 from pyMoM3d.mom.surface_current import evaluate_surface_current
@@ -80,7 +81,7 @@ class TestSolve:
     def plate_system(self):
         mesh, basis = _make_small_plate()
         k = 2 * np.pi
-        Z = fill_impedance_matrix(basis, mesh, k, eta0, quad_order=4)
+        Z = fill_matrix(EFIEOperator(), basis, mesh, k, eta0, quad_order=4)
         exc = PlaneWaveExcitation(
             E0=np.array([1.0, 0.0, 0.0]),
             k_hat=np.array([0.0, 0.0, -1.0]),

@@ -221,6 +221,106 @@ class PEECCircuit:
 
         return Z_port
 
+    def solve_with_currents(
+        self,
+        freq: float,
+        segments: List[TraceSegment],
+    ) -> tuple:
+        """Solve MNA and return both port Z-matrix and branch currents.
+
+        Parameters
+        ----------
+        freq : float
+            Frequency (Hz).
+        segments : list of TraceSegment
+
+        Returns
+        -------
+        Z_port : ndarray, shape (P, P), complex128
+            Port impedance matrix.
+        I_branches : ndarray, shape (M, P), complex128
+            Branch (segment) currents for each port excitation.
+        """
+        omega = 2.0 * np.pi * freq
+        M = len(segments)
+        N = self.num_nodes
+        P = len(self.ports)
+
+        # Branch impedance matrix
+        R = resistance_vector(segments, freq)
+        Z_br = np.diag(R) + 1j * omega * self.Lp
+
+        A = self._build_incidence_matrix()
+        Y_node = np.zeros((N, N), dtype=np.complex128)
+
+        if self.Cp is not None and omega > 0:
+            Y_cap_br = 1j * omega * self.Cp
+            Y_node += A.T @ Y_cap_br @ A
+
+        if self.C_shunt is not None and omega > 0:
+            for m in range(M):
+                c_half = 0.5 * self.C_shunt[m]
+                y_shunt = 1j * omega * c_half
+                n_start, n_end = self.connectivity[m]
+                Y_node[n_start, n_start] += y_shunt
+                Y_node[n_end, n_end] += y_shunt
+
+        if self.G_shunt is not None:
+            for m in range(M):
+                g_half = 0.5 * self.G_shunt[m]
+                n_start, n_end = self.connectivity[m]
+                Y_node[n_start, n_start] += g_half
+                Y_node[n_end, n_end] += g_half
+
+        S = N + M
+        MNA = np.zeros((S, S), dtype=np.complex128)
+        MNA[:N, :N] = Y_node
+        MNA[:N, N:] = A.T
+        MNA[N:, :N] = A
+        MNA[N:, N:] = -Z_br
+
+        ground_node = self._find_ground_node()
+        MNA[ground_node, :] = 0.0
+        MNA[ground_node, ground_node] = 1.0
+
+        Z_port = np.zeros((P, P), dtype=np.complex128)
+        I_branches = np.zeros((M, P), dtype=np.complex128)
+
+        for p_exc in range(P):
+            port = self.ports[p_exc]
+            rhs = np.zeros(S, dtype=np.complex128)
+
+            pos_seg = port.positive_segment_idx
+            pos_start_node = self.connectivity[pos_seg, 0]
+
+            if port.negative_segment_idx >= 0:
+                neg_seg = port.negative_segment_idx
+                neg_end_node = self.connectivity[neg_seg, 1]
+                rhs[pos_start_node] += 1.0
+                rhs[neg_end_node] -= 1.0
+            else:
+                rhs[pos_start_node] += 1.0
+
+            rhs[ground_node] = 0.0
+            x = np.linalg.solve(MNA, rhs)
+
+            V_nodes = x[:N]
+            I_branches[:, p_exc] = x[N:]
+
+            for p_meas in range(P):
+                port_m = self.ports[p_meas]
+                pos_seg_m = port_m.positive_segment_idx
+                v_pos = V_nodes[self.connectivity[pos_seg_m, 0]]
+
+                if port_m.negative_segment_idx >= 0:
+                    neg_seg_m = port_m.negative_segment_idx
+                    v_neg = V_nodes[self.connectivity[neg_seg_m, 1]]
+                    Z_port[p_meas, p_exc] = v_pos - v_neg
+                else:
+                    Z_port[p_meas, p_exc] = v_pos
+
+        return Z_port, I_branches
+
     def _find_ground_node(self) -> int:
         """Find the ground reference node.
 
@@ -241,6 +341,7 @@ class PEECCircuit:
         frequencies: np.ndarray,
         segments: List[TraceSegment],
         Z0: float = 50.0,
+        store_currents: bool = False,
     ) -> List[NetworkResult]:
         """Frequency sweep returning NetworkResult objects.
 
@@ -254,6 +355,9 @@ class PEECCircuit:
         segments : list of TraceSegment
         Z0 : float
             Reference impedance for S-parameters.
+        store_currents : bool
+            If True, store branch currents in ``NetworkResult.I_solutions``.
+            Shape is (M, P) where M is number of segments and P is ports.
 
         Returns
         -------
@@ -265,12 +369,17 @@ class PEECCircuit:
 
         results = []
         for freq in frequencies:
-            Z_port = self.solve_impedance(freq, segments)
+            if store_currents:
+                Z_port, I_branches = self.solve_with_currents(freq, segments)
+            else:
+                Z_port = self.solve_impedance(freq, segments)
+                I_branches = None
             results.append(NetworkResult(
                 frequency=float(freq),
                 Z_matrix=Z_port,
                 port_names=port_names,
                 Z0=Z0,
+                I_solutions=I_branches,
             ))
 
         return results

@@ -133,6 +133,7 @@ class PEECExtractor:
     def extract(
         self,
         frequencies: Union[float, List[float], np.ndarray],
+        store_currents: bool = False,
     ) -> List[NetworkResult]:
         """Extract network parameters at specified frequencies.
 
@@ -140,6 +141,9 @@ class PEECExtractor:
         ----------
         frequencies : float or array-like
             Frequencies (Hz).
+        store_currents : bool
+            If True, store branch (segment) currents in each
+            ``NetworkResult.I_solutions``, shape (M, P).
 
         Returns
         -------
@@ -147,7 +151,10 @@ class PEECExtractor:
             One per frequency.  Compatible with InductorCharacterization.
         """
         frequencies = np.atleast_1d(np.asarray(frequencies, dtype=np.float64))
-        return self.circuit.solve_sweep(frequencies, self.segments, Z0=self.Z0)
+        return self.circuit.solve_sweep(
+            frequencies, self.segments, Z0=self.Z0,
+            store_currents=store_currents,
+        )
 
     @property
     def total_inductance_estimate(self) -> float:

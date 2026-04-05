@@ -273,10 +273,28 @@ class MultilayerEFIEOperator(EFIEOperator):
                     quad_order=quad_order, near_threshold=near_threshold,
                 )
                 # Smooth correction: G_ML - G_fs integrated over source triangle
-                # Batch over Q source points
+                # Guard against catastrophic cancellation at R ≈ 0:
+                # both G_ML and G_fs diverge as 1/R, so their pointwise
+                # difference is inaccurate for R < threshold.  Interpolate
+                # the correction at singular points from regular ones
+                # (matches C++ kernel's R_SMOOTH_THRESH logic).
+                R_SMOOTH_THRESH = 1e-10
                 r_obs_tiled = np.tile(r_obs_i, (Q, 1))  # (Q, 3)
-                g_correction = gf.scalar_G(r_obs_tiled, r_src_all)   # (Q,)
-                g_smooth = np.dot(weights, g_correction) * twice_area_src
+                R_src = np.linalg.norm(r_obs_tiled - r_src_all, axis=-1)
+                regular = R_src >= R_SMOOTH_THRESH
+                if np.all(regular):
+                    g_correction = gf.scalar_G(r_obs_tiled, r_src_all)
+                    g_smooth = np.dot(weights, g_correction) * twice_area_src
+                elif np.any(regular):
+                    g_correction = gf.scalar_G(
+                        r_obs_tiled[regular], r_src_all[regular])
+                    w_reg = weights[regular]
+                    w_sing = weights[~regular]
+                    g_corr_avg = np.dot(w_reg, g_correction) / w_reg.sum()
+                    g_smooth = (np.dot(w_reg, g_correction)
+                                + w_sing.sum() * g_corr_avg) * twice_area_src
+                else:
+                    g_smooth = 0.0 + 0.0j
                 g_int = g_singular + g_smooth
 
             elif same_layer:
@@ -295,9 +313,16 @@ class MultilayerEFIEOperator(EFIEOperator):
                 g_int = g_fs_int + g_smooth
 
             else:
-                # Cross-layer: full G_ML, no singularity extraction
+                # Cross-layer: full G_ML, no singularity extraction.
+                # Backend returns smooth correction (G_ML - G_fs), so we
+                # must add G_fs back to get the full Green's function.
                 r_obs_tiled = np.tile(r_obs_i, (Q, 1))
-                g_ml_vals = gf.scalar_G(r_obs_tiled, r_src_all)   # (Q,)
+                diff = r_obs_i[np.newaxis, :] - r_src_all
+                R = np.linalg.norm(diff, axis=-1)
+                R = np.maximum(R, 1e-30)
+                g_fs_vals = np.exp(-1j * k * R) / (4.0 * np.pi * R)
+                g_corr_vals = gf.scalar_G(r_obs_tiled, r_src_all)
+                g_ml_vals = g_fs_vals + g_corr_vals
                 g_int = np.dot(weights, g_ml_vals) * twice_area_src
 
             I_Phi_raw += weights[i] * g_int
@@ -329,17 +354,42 @@ class MultilayerEFIEOperator(EFIEOperator):
                     r_fv_src, quad_order=quad_order, near_threshold=near_threshold,
                 )
                 # Smooth correction: (G_A - g_fs·I) · rho_src
+                # Same R ≈ 0 guard as scalar potential path.
+                R_SMOOTH_THRESH = 1e-10
                 r_obs_tiled = np.tile(r_obs_i, (Q, 1))
+                R_src = np.linalg.norm(r_obs_tiled - r_src_all, axis=-1)
+                regular = R_src >= R_SMOOTH_THRESH
                 if _has_dyadic:
-                    # G_A_corr shape (Q, 3, 3)
-                    ga_corr = gf.dyadic_G(r_obs_tiled, r_src_all)
-                    # rho_src_g_smooth[i] = Σ_j weights[j] * Σ_k GA_corr[j,i,k] * rho[j,k]
-                    ga_dot_rho = np.einsum('jik,jk->ji', ga_corr, rho_src_all)  # (Q, 3)
-                    rho_src_g_smooth = np.einsum('j,ji->i', weights, ga_dot_rho) * twice_area_src
+                    if np.all(regular):
+                        ga_corr = gf.dyadic_G(r_obs_tiled, r_src_all)
+                        ga_dot_rho = np.einsum('jik,jk->ji', ga_corr, rho_src_all)
+                        rho_src_g_smooth = np.einsum('j,ji->i', weights, ga_dot_rho) * twice_area_src
+                    elif np.any(regular):
+                        ga_corr = gf.dyadic_G(
+                            r_obs_tiled[regular], r_src_all[regular])
+                        ga_dot_rho = np.einsum('jik,jk->ji', ga_corr, rho_src_all[regular])
+                        w_reg = weights[regular]
+                        w_sing = weights[~regular]
+                        # Weighted average for interpolation at singular points
+                        ga_dot_rho_avg = np.einsum('j,ji->i', w_reg, ga_dot_rho) / w_reg.sum()
+                        rho_src_g_smooth = (np.einsum('j,ji->i', w_reg, ga_dot_rho)
+                                            + w_sing.sum() * ga_dot_rho_avg) * twice_area_src
+                    else:
+                        rho_src_g_smooth = np.zeros(3, dtype=np.complex128)
                 else:
-                    # Fallback: use scalar_G (approximate, same as free-space)
-                    g_corr_vals = gf.scalar_G(r_obs_tiled, r_src_all)
-                    rho_src_g_smooth = np.einsum('j,ji,j->i', weights, rho_src_all, g_corr_vals) * twice_area_src
+                    if np.all(regular):
+                        g_corr_vals = gf.scalar_G(r_obs_tiled, r_src_all)
+                        rho_src_g_smooth = np.einsum('j,ji,j->i', weights, rho_src_all, g_corr_vals) * twice_area_src
+                    elif np.any(regular):
+                        g_corr_vals = gf.scalar_G(
+                            r_obs_tiled[regular], r_src_all[regular])
+                        w_reg = weights[regular]
+                        w_sing = weights[~regular]
+                        g_corr_avg = np.dot(w_reg, g_corr_vals) / w_reg.sum()
+                        rho_src_g_smooth = (np.einsum('j,ji,j->i', w_reg, rho_src_all[regular], g_corr_vals)
+                                            + w_sing.sum() * g_corr_avg * rho_src_all[~regular].sum(axis=0)) * twice_area_src
+                    else:
+                        rho_src_g_smooth = np.zeros(3, dtype=np.complex128)
                 rho_src_g_int = rho_src_g + rho_src_g_smooth
 
             elif same_layer:
@@ -362,15 +412,24 @@ class MultilayerEFIEOperator(EFIEOperator):
                 rho_src_g_int = rho_src_g_fs + rho_src_g_corr
 
             else:
-                # Cross-layer: full G_A (no singularity extraction)
+                # Cross-layer: full G_A (no singularity extraction).
+                # Backend returns smooth correction, so add G_fs back.
                 r_obs_tiled = np.tile(r_obs_i, (Q, 1))
+                diff = r_obs_i[np.newaxis, :] - r_src_all
+                R = np.linalg.norm(diff, axis=-1)
+                R = np.maximum(R, 1e-30)
+                g_fs_vals = np.exp(-1j * k * R) / (4.0 * np.pi * R)
                 if _has_dyadic:
-                    ga_full = gf.dyadic_G(r_obs_tiled, r_src_all,
-                                          return_correction=False)
+                    # Dyadic correction + free-space isotropic part
+                    ga_corr = gf.dyadic_G(r_obs_tiled, r_src_all)
+                    # Full dyadic = correction + g_fs * I
+                    eye3 = np.eye(3)[np.newaxis, :, :]  # (1, 3, 3)
+                    ga_full = ga_corr + g_fs_vals[:, np.newaxis, np.newaxis] * eye3
                     ga_dot_rho = np.einsum('jik,jk->ji', ga_full, rho_src_all)
                     rho_src_g_int = np.einsum('j,ji->i', weights, ga_dot_rho) * twice_area_src
                 else:
-                    g_ml_vals = gf.scalar_G(r_obs_tiled, r_src_all)
+                    g_corr_vals = gf.scalar_G(r_obs_tiled, r_src_all)
+                    g_ml_vals = g_fs_vals + g_corr_vals
                     rho_src_g_int = np.einsum('j,ji,j->i', weights, rho_src_all, g_ml_vals) * twice_area_src
 
             I_A_raw += weights[i] * np.dot(rho_test_i, rho_src_g_int)

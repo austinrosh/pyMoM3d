@@ -19,7 +19,8 @@ import time
 import numpy as np
 
 from pyMoM3d import Sphere, GmshMesher, compute_rwg_connectivity, c0, eta0
-from pyMoM3d.mom.impedance import fill_impedance_matrix
+from pyMoM3d.mom.assembly import fill_matrix
+from pyMoM3d.mom.operators import EFIEOperator
 
 # ---------------------------------------------------------------------------
 # Parameters
@@ -55,10 +56,10 @@ def build_mesh(edge_len):
 
 def time_fill(basis, mesh, k, eta, backend):
     t0 = time.perf_counter()
-    fill_impedance_matrix(basis, mesh, k, eta,
-                          quad_order=QUAD_ORDER,
-                          near_threshold=NEAR_THRESHOLD,
-                          backend=backend)
+    fill_matrix(EFIEOperator(), basis, mesh, k, eta,
+                quad_order=QUAD_ORDER,
+                near_threshold=NEAR_THRESHOLD,
+                backend=backend)
     return time.perf_counter() - t0
 
 

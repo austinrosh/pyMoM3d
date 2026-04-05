@@ -15,8 +15,8 @@ LayerStack (bottom to top):
   PEC half-space
   Silicon  (z=0 to z=300 um, eps_r=11.7, sigma=10)
   SiO2     (z=300 um to z=305 um, eps_r=3.9)
-  Phantom  (z=305 um to z=310 um, eps_r=1.001)
   Air half-space
+  Strip placed at SiO2/air interface (z=305 um)
 
 Port model:
   Differential port: +V_ref at the outer terminal, -V_ref at the inner
@@ -60,9 +60,10 @@ from pyMoM3d import (
     Layer, LayerStack,
     configure_latex_style, c0,
     wheeler_inductance, quality_factor, inductance_from_z,
+    compute_triangle_current_density, compute_triangle_current_vectors,
 )
 from pyMoM3d.mesh.mesh_data import Mesh
-from pyMoM3d.mom.excitation import StripDeltaGapExcitation
+from pyMoM3d.mom.excitation import StripDeltaGapExcitation, compute_feed_signs_along_direction
 
 configure_latex_style()
 
@@ -80,8 +81,6 @@ EPS_SI   = 11.7        # Silicon relative permittivity
 SIGMA_SI = 10.0        # Silicon conductivity (S/m)
 H_OX     = 5e-6        # SiO2 thickness (m)
 EPS_OX   = 3.9         # SiO2 relative permittivity
-H_PHANT  = 5e-6        # Phantom air layer thickness (m)
-
 # Spiral geometry (mm-scale for EFIE validity at GHz frequencies)
 N_TURNS  = 2.5         # Number of turns
 W_TRACE  = 100e-6      # Trace width (m)
@@ -107,15 +106,13 @@ def build_layer_stack():
     """Build the CMOS-like layer stack."""
     z_si_top = H_SI
     z_ox_top = H_SI + H_OX
-    z_ph_top = z_ox_top + H_PHANT
 
     return LayerStack([
         Layer('pec_ground', z_bot=-np.inf, z_top=0.0, eps_r=1.0, is_pec=True),
         Layer('silicon',    z_bot=0.0,     z_top=z_si_top, eps_r=EPS_SI,
               conductivity=SIGMA_SI),
         Layer('SiO2',       z_bot=z_si_top, z_top=z_ox_top, eps_r=EPS_OX),
-        Layer('phantom',    z_bot=z_ox_top, z_top=z_ph_top, eps_r=1.001),
-        Layer('air',        z_bot=z_ph_top, z_top=np.inf, eps_r=1.0),
+        Layer('air',        z_bot=z_ox_top, z_top=np.inf, eps_r=1.0),
     ])
 
 
@@ -415,8 +412,14 @@ def main():
     if not ret_indices:
         print("WARNING: No return edges found. Using single-ended port.")
 
+    # Compute feed signs for correct RWG orientation at the signal port.
+    # Signal port is at the first segment (direction +x).
+    feed_signs = compute_feed_signs_along_direction(
+        mesh, basis, feed_indices, np.array([1, 0, 0]))
+
     # Differential port: +V at outer terminal, -V at inner terminal
     port = Port(name='P1', feed_basis_indices=feed_indices,
+                feed_signs=feed_signs,
                 return_basis_indices=ret_indices if ret_indices else [])
 
     # --- Build Simulation ---
@@ -427,14 +430,14 @@ def main():
         quad_order=4,
         backend='auto',
         layer_stack=stack,
-        source_layer_name='phantom',
+        source_layer_name='SiO2',
     )
     sim = Simulation(config, mesh=mesh, reporter=SilentReporter())
 
     # --- Frequency sweep with loop-star ---
     extractor = NetworkExtractor(
         sim, [port],
-        use_loop_star=False,
+        store_currents=True,
     )
     print(f"\nSweeping {len(FREQS)} frequencies "
           f"({FREQS[0]/1e9:.1f}-{FREQS[-1]/1e9:.1f} GHz) "
@@ -530,6 +533,76 @@ def main():
     fig.savefig(out, dpi=150, bbox_inches='tight')
     plt.close(fig)
     print(f"\n  Saved -> {out}")
+
+    # --- Surface current visualization ---
+    # Pick a mid-frequency result that has stored currents
+    mid_idx = len(FREQS) // 2
+    mid_result = results[mid_idx]
+    mid_freq = FREQS[mid_idx]
+
+    if mid_result.I_solutions is not None:
+        I_coeffs = mid_result.I_solutions[:, 0]  # Port 1 excitation
+
+        # Compute current density (scalar |J| per triangle)
+        J_mag = compute_triangle_current_density(I_coeffs, basis, mesh)
+
+        # Compute current vectors (Re(J) at centroids)
+        J_vecs, _, centroids = compute_triangle_current_vectors(
+            I_coeffs, basis, mesh, component='real')
+
+        # --- 2D top-down heatmap of |J| ---
+        from matplotlib.tri import Triangulation
+        verts = mesh.vertices
+        tri_2d = Triangulation(verts[:, 0] * 1e3, verts[:, 1] * 1e3,
+                               mesh.triangles)
+
+        fig_j, ax_j = plt.subplots(1, 1, figsize=(8, 7))
+        tpc = ax_j.tripcolor(tri_2d, J_mag, cmap='hot', shading='flat')
+        ax_j.triplot(tri_2d, color='gray', lw=0.2, alpha=0.3)
+        cbar = fig_j.colorbar(tpc, ax=ax_j, shrink=0.8)
+        cbar.set_label(r'$|\mathbf{J}|$ (A/m)')
+        ax_j.set_xlabel(r'$x$ (mm)')
+        ax_j.set_ylabel(r'$y$ (mm)')
+        ax_j.set_title(
+            rf'Surface Current $|\mathbf{{J}}|$ at $f = {mid_freq/1e9:.1f}$ GHz')
+        ax_j.set_aspect('equal')
+
+        out_j = os.path.join(IMAGES_DIR, 'spiral_inductor_current.png')
+        fig_j.tight_layout()
+        fig_j.savefig(out_j, dpi=150, bbox_inches='tight')
+        plt.close(fig_j)
+        print(f"  Saved -> {out_j}")
+
+        # --- 2D vector arrows showing current direction ---
+        fig_v, ax_v = plt.subplots(1, 1, figsize=(8, 7))
+        # Light mesh background
+        ax_v.tripcolor(tri_2d, J_mag, cmap='Greys', shading='flat', alpha=0.15)
+        ax_v.triplot(tri_2d, color='lightgray', lw=0.2, alpha=0.3)
+
+        # Quiver plot of Re(J) at centroids
+        cx = centroids[:, 0] * 1e3
+        cy = centroids[:, 1] * 1e3
+        jx = J_vecs[:, 0]
+        jy = J_vecs[:, 1]
+        j_norm = np.sqrt(jx**2 + jy**2)
+        j_max = np.max(j_norm) if np.max(j_norm) > 0 else 1.0
+
+        ax_v.quiver(cx, cy, jx / j_max, jy / j_max, j_norm,
+                    cmap='viridis', scale=30, width=0.003, headwidth=3,
+                    headlength=4, alpha=0.8)
+        ax_v.set_xlabel(r'$x$ (mm)')
+        ax_v.set_ylabel(r'$y$ (mm)')
+        ax_v.set_title(
+            rf'$\mathrm{{Re}}(\mathbf{{J}})$ at $f = {mid_freq/1e9:.1f}$ GHz')
+        ax_v.set_aspect('equal')
+
+        out_v = os.path.join(IMAGES_DIR, 'spiral_inductor_current_vectors.png')
+        fig_v.tight_layout()
+        fig_v.savefig(out_v, dpi=150, bbox_inches='tight')
+        plt.close(fig_v)
+        print(f"  Saved -> {out_v}")
+    else:
+        print("  (No stored currents — skipping current visualization)")
 
 
 if __name__ == '__main__':

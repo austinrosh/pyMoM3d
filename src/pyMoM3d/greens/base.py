@@ -119,11 +119,11 @@ class GreensFunctionBase(ABC):
         """Active evaluation backend."""
 
     # Convenience delegation — operators call these, not the backend directly.
-    def scalar_G(self, r: np.ndarray, r_prime: np.ndarray) -> np.ndarray:
-        return self.backend.scalar_G(r, r_prime)
+    def scalar_G(self, r: np.ndarray, r_prime: np.ndarray, **kwargs) -> np.ndarray:
+        return self.backend.scalar_G(r, r_prime, **kwargs)
 
-    def dyadic_G(self, r: np.ndarray, r_prime: np.ndarray) -> np.ndarray:
-        return self.backend.dyadic_G(r, r_prime)
+    def dyadic_G(self, r: np.ndarray, r_prime: np.ndarray, **kwargs) -> np.ndarray:
+        return self.backend.dyadic_G(r, r_prime, **kwargs)
 
-    def grad_G(self, r: np.ndarray, r_prime: np.ndarray) -> np.ndarray:
-        return self.backend.grad_G(r, r_prime)
+    def grad_G(self, r: np.ndarray, r_prime: np.ndarray, **kwargs) -> np.ndarray:
+        return self.backend.grad_G(r, r_prime, **kwargs)

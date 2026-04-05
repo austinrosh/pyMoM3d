@@ -12,7 +12,8 @@ from ..mesh.mesh_data import Mesh
 from ..mesh.rwg_basis import RWGBasis
 from ..mesh.gmsh_mesher import GmshMesher
 from ..mesh.rwg_connectivity import compute_rwg_connectivity
-from ..mom.impedance import fill_impedance_matrix
+from ..mom.assembly import fill_matrix
+from ..mom.operators import EFIEOperator
 from ..mom.excitation import find_feed_edges_near_center, MultiPortExcitation
 from ..mom.solver import solve_direct
 from ..fields.far_field import compute_far_field
@@ -24,7 +25,7 @@ from ..utils.constants import c0, eta0
 # Module-level helper functions
 # ---------------------------------------------------------------------------
 
-def combine_meshes(meshes: list) -> tuple:
+def combine_array_meshes(meshes: list) -> tuple:
     """Combine multiple disjoint meshes into one.
 
     Generalizes build_two_antenna_mesh from friis_validation.py to N meshes.
@@ -56,6 +57,10 @@ def combine_meshes(meshes: list) -> tuple:
     combined_verts = np.vstack(all_verts)
     combined_tris = np.vstack(all_tris)
     return Mesh(combined_verts, combined_tris), vertex_offsets
+
+
+# Backward-compatible alias
+combine_meshes = combine_array_meshes
 
 
 def compute_array_factor(theta, phi, element_positions, amplitudes, k):
@@ -373,8 +378,8 @@ class LinearDipoleArray:
         -------
         Z : ndarray, shape (N, N), complex128
         """
-        self._Z = fill_impedance_matrix(
-            self.basis, self.mesh, self.k, eta0, **kwargs
+        self._Z = fill_matrix(
+            EFIEOperator(), self.basis, self.mesh, self.k, eta0, **kwargs
         )
         # Cache LU factorization for fast repeated solves
         self._lu, self._piv = scipy.linalg.lu_factor(self._Z)

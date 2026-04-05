@@ -143,6 +143,11 @@ def fill_impedance_matrix(
 ) -> np.ndarray:
     """Assemble the EFIE impedance matrix.
 
+    .. deprecated::
+        Use ``fill_matrix(EFIEOperator(), basis, mesh, k, eta)`` from
+        ``pyMoM3d.mom.assembly`` instead.  This function will be removed
+        in a future release.
+
     Parameters
     ----------
     rwg_basis : RWGBasis
@@ -169,6 +174,14 @@ def fill_impedance_matrix(
     Z : ndarray, shape (N, N), complex128
         Impedance matrix.
     """
+    import warnings
+    warnings.warn(
+        "fill_impedance_matrix() is deprecated. Use "
+        "fill_matrix(EFIEOperator(), basis, mesh, k, eta) from "
+        "pyMoM3d.mom.assembly instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     # Resolve 'auto': prefer cpp → numba → numpy
     if backend == 'auto':
         if CPP_AVAILABLE:

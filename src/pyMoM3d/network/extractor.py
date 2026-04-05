@@ -70,13 +70,6 @@ class NetworkExtractor:
         but requires scipy.  Default False (``np.linalg.solve`` is used,
         which calls the same LAPACK routine and handles the (N, P) system
         in one call).
-    use_loop_star : bool, optional
-        If True, solve in the loop-star basis for improved conditioning at
-        low frequencies (kD << 1).  The loop-star decomposition separates
-        vector-potential (inductance) and scalar-potential (capacitance)
-        contributions, preventing low-frequency breakdown of the EFIE.
-        Default False.  Deprecated — use ``low_freq_stabilization='loop_star'``
-        instead.
     low_freq_stabilization : str, optional
         Low-frequency stabilization strategy.  One of:
 
@@ -107,7 +100,7 @@ class NetworkExtractor:
 
         via = GroundVia('inner', basis_indices=via_edges)
         extractor = NetworkExtractor(sim, [port], ground_vias=[via],
-                                     use_loop_star=True)
+                                     low_freq_stabilization='loop_star')
         results = extractor.extract(frequencies)
     """
 
@@ -119,9 +112,9 @@ class NetworkExtractor:
         Z0: float = 50.0,
         store_currents: bool = False,
         use_lu_cache: bool = False,
-        use_loop_star: bool = False,
         low_freq_stabilization: str = 'none',
         conductor=None,
+        hybrid_basis=None,
     ):
         self.sim = simulation
         self.ports = list(ports)
@@ -129,8 +122,8 @@ class NetworkExtractor:
         self.Z0 = float(Z0)
         self.store_currents = store_currents
         self.use_lu_cache = use_lu_cache
-        self.use_loop_star = use_loop_star
         self.conductor = conductor
+        self.hybrid_basis = hybrid_basis
         self._validate_ports()
 
         # Precompute Gram matrix if conductor properties are specified
@@ -143,11 +136,7 @@ class NetworkExtractor:
                 quad_order=self.sim.config.quad_order,
             )
 
-        # Resolve low_freq_stabilization (use_loop_star is backward compat)
-        if use_loop_star and low_freq_stabilization == 'none':
-            self.low_freq_stabilization = 'loop_star'
-        else:
-            self.low_freq_stabilization = low_freq_stabilization
+        self.low_freq_stabilization = low_freq_stabilization
 
         _valid = ('auto', 'aefie', 'loop_star', 'none')
         if self.low_freq_stabilization not in _valid:
@@ -170,7 +159,10 @@ class NetworkExtractor:
     # ------------------------------------------------------------------
 
     def _validate_ports(self) -> None:
-        N = self.sim.basis.num_basis
+        if self.hybrid_basis is not None:
+            N = self.hybrid_basis.num_total
+        else:
+            N = self.sim.basis.num_basis
         for port in self.ports:
             for idx in port.feed_basis_indices:
                 if not (0 <= idx < N):
@@ -225,6 +217,7 @@ class NetworkExtractor:
                 _gf = LayeredGreensFunction(
                     self.sim.config.layer_stack, freq,
                     source_layer_name=self.sim.config.source_layer_name,
+                    backend=getattr(self.sim.config, 'gf_backend', 'auto'),
                 )
                 k   = complex(_gf.wavenumber)
                 eta = complex(_gf.wave_impedance)
@@ -235,9 +228,16 @@ class NetworkExtractor:
             # Resolve stabilization strategy for this frequency
             stab = self._resolve_stabilization(k)
 
+            # Determine which basis object to use for port operations
+            if self.hybrid_basis is not None:
+                from ..wire.hybrid import HybridBasisAdapter, fill_hybrid_matrix
+                _basis_for_ports = HybridBasisAdapter(self.hybrid_basis)
+            else:
+                _basis_for_ports = self.sim.basis
+
             # 2. Build (N, P) RHS matrix — one column per port
             V_all = np.column_stack([
-                p.build_excitation_vector(self.sim.basis) for p in self.ports
+                p.build_excitation_vector(_basis_for_ports) for p in self.ports
             ])
 
             # 3. Solve
@@ -248,15 +248,31 @@ class NetworkExtractor:
             else:
                 # Standard EFIE solve
                 op = self._make_operator(freq)
-                Z_sys = fill_matrix(
-                    op,
-                    self.sim.basis,
-                    self.sim.mesh,
-                    k, eta,
-                    quad_order=self.sim.config.quad_order,
-                    near_threshold=self.sim.config.near_threshold,
-                    backend=self.sim.config.backend,
-                )
+
+                if self.hybrid_basis is not None:
+                    Z_sys = fill_hybrid_matrix(
+                        op,
+                        self.sim.basis,
+                        self.sim.mesh,
+                        self.hybrid_basis.wire_basis,
+                        self.hybrid_basis.wire_mesh,
+                        k, eta,
+                        quad_order=self.sim.config.quad_order,
+                        near_threshold=self.sim.config.near_threshold,
+                        backend=self.sim.config.backend,
+                        junctions=self.hybrid_basis.junctions or None,
+                    )
+                else:
+                    Z_sys = fill_matrix(
+                        op,
+                        self.sim.basis,
+                        self.sim.mesh,
+                        k, eta,
+                        quad_order=self.sim.config.quad_order,
+                        near_threshold=self.sim.config.near_threshold,
+                        backend=self.sim.config.backend,
+                    )
+
                 for via in self.ground_vias:
                     via.apply_to_matrix(Z_sys, self.sim.basis)
 
@@ -276,16 +292,32 @@ class NetworkExtractor:
                     self._last_cond = float('inf')
 
             # 4. Z-matrix extraction
+            #
+            # MoM delta-gap excitation shorts non-excited ports (V_q = 0),
+            # so the terminal currents give the Y-matrix directly:
+            #   Y[q, p] = I_term[q, p] / V_ref_p
+            # The Z-matrix is obtained by matrix inversion: Z = inv(Y).
+            #
+            # For a single port this reduces to Z = V_ref / I_term (scalar).
             P = len(self.ports)
-            Z_mat = np.zeros((P, P), dtype=np.complex128)
+            Y_mat = np.zeros((P, P), dtype=np.complex128)
             for q, port_q in enumerate(self.ports):
                 for p in range(P):
-                    I_term = port_q.terminal_current(I_all[:, p], self.sim.basis)
+                    I_term = port_q.terminal_current(I_all[:, p], _basis_for_ports)
                     V_ref  = self.ports[p].V_ref
-                    if abs(I_term) > 1e-30:
-                        Z_mat[q, p] = V_ref / I_term
-                    else:
-                        Z_mat[q, p] = np.inf + 0j
+                    Y_mat[q, p] = I_term / V_ref
+
+            if P == 1:
+                # Single port: Z = 1/Y (avoid unnecessary matrix ops)
+                if abs(Y_mat[0, 0]) > 1e-30:
+                    Z_mat = np.array([[1.0 / Y_mat[0, 0]]], dtype=np.complex128)
+                else:
+                    Z_mat = np.array([[np.inf + 0j]], dtype=np.complex128)
+            else:
+                try:
+                    Z_mat = np.linalg.inv(Y_mat)
+                except np.linalg.LinAlgError:
+                    Z_mat = np.full((P, P), np.inf + 0j)
 
             try:
                 cond = float(self._last_cond)
@@ -320,6 +352,7 @@ class NetworkExtractor:
             gf = LayeredGreensFunction(
                 self.sim.config.layer_stack, frequency,
                 source_layer_name=self.sim.config.source_layer_name,
+                backend=getattr(self.sim.config, 'gf_backend', 'auto'),
             )
             return MultilayerEFIEOperator(gf)
         return EFIEOperator()
@@ -368,6 +401,7 @@ class NetworkExtractor:
             greens_fn = LayeredGreensFunction(
                 self.sim.config.layer_stack, freq,
                 source_layer_name=self.sim.config.source_layer_name,
+                backend=getattr(self.sim.config, 'gf_backend', 'auto'),
             )
             op_vp = MultilayerEFIEOperator(greens_fn, a_only=True)
             # Use the layered GF's k and eta
@@ -456,6 +490,7 @@ class NetworkExtractor:
             greens_fn = LayeredGreensFunction(
                 self.sim.config.layer_stack, freq,
                 source_layer_name=self.sim.config.source_layer_name,
+                backend=getattr(self.sim.config, 'gf_backend', 'auto'),
             )
             op_vp = MultilayerEFIEOperator(greens_fn, a_only=True)
         else:

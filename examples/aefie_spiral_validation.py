@@ -36,7 +36,7 @@ from pyMoM3d import (
     wheeler_inductance, quality_factor, inductance_from_z,
 )
 from pyMoM3d.mesh.mesh_data import Mesh
-from pyMoM3d.mom.excitation import StripDeltaGapExcitation
+from pyMoM3d.mom.excitation import StripDeltaGapExcitation, compute_feed_signs_along_direction
 
 configure_latex_style()
 
@@ -53,8 +53,6 @@ EPS_SI   = 11.7
 SIGMA_SI = 10.0
 H_OX     = 5e-6
 EPS_OX   = 3.9
-H_PHANT  = 5e-6
-
 N_TURNS  = 2.5
 W_TRACE  = 100e-6
 S_SPACE  = 100e-6
@@ -75,14 +73,12 @@ FREQS     = FREQS_GHZ * 1e9
 def build_layer_stack():
     z_si_top = H_SI
     z_ox_top = H_SI + H_OX
-    z_ph_top = z_ox_top + H_PHANT
     return LayerStack([
         Layer('pec_ground', z_bot=-np.inf, z_top=0.0, eps_r=1.0, is_pec=True),
         Layer('silicon',    z_bot=0.0,     z_top=z_si_top, eps_r=EPS_SI,
               conductivity=SIGMA_SI),
         Layer('SiO2',       z_bot=z_si_top, z_top=z_ox_top, eps_r=EPS_OX),
-        Layer('phantom',    z_bot=z_ox_top, z_top=z_ph_top, eps_r=1.001),
-        Layer('air',        z_bot=z_ph_top, z_top=np.inf, eps_r=1.0),
+        Layer('air',        z_bot=z_ox_top, z_top=np.inf, eps_r=1.0),
     ])
 
 
@@ -306,7 +302,12 @@ def main():
         print("ERROR: No feed edges found.")
         return
 
+    # Compute feed signs for correct RWG orientation
+    feed_signs = compute_feed_signs_along_direction(
+        mesh, basis, feed_indices, np.array([1, 0, 0]))
+
     port = Port(name='P1', feed_basis_indices=feed_indices,
+                feed_signs=feed_signs,
                 return_basis_indices=ret_indices if ret_indices else [])
 
     # --- Build Simulation ---
@@ -317,7 +318,7 @@ def main():
         quad_order=4,
         backend='auto',
         layer_stack=stack,
-        source_layer_name='phantom',
+        source_layer_name='SiO2',
     )
     sim = Simulation(config, mesh=mesh, reporter=SilentReporter())
 

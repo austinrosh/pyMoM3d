@@ -171,6 +171,88 @@ class Port:
         return Port(name=name, feed_basis_indices=indices)
 
     @staticmethod
+    def from_vertex(
+        mesh,
+        rwg_basis,
+        vertex_pos: np.ndarray,
+        name: str = 'probe',
+        tol: float = None,
+    ) -> 'Port':
+        """Create a probe feed port at a surface mesh vertex.
+
+        Models a coaxial probe by finding the mesh vertex closest to
+        ``vertex_pos`` and exciting all RWG basis functions sharing that
+        vertex.  Signs are set so that current flows radially outward
+        from the probe point, consistent with a vertical current source
+        injecting current at this location.
+
+        The PEC ground plane (if present) is handled by the layered
+        Green's function — no explicit wire is needed.
+
+        Parameters
+        ----------
+        mesh : Mesh
+        rwg_basis : RWGBasis
+        vertex_pos : array-like, shape (2,) or (3,)
+            Position of the probe.  If 2D (x, y), the z-coordinate is
+            taken from the mesh.  If 3D, the nearest vertex is found.
+        name : str
+        tol : float, optional
+            Maximum distance to the nearest vertex.  Defaults to the
+            mean edge length.
+
+        Returns
+        -------
+        Port
+        """
+        vertex_pos = np.asarray(vertex_pos, dtype=np.float64).ravel()
+        verts = mesh.vertices
+
+        if len(vertex_pos) == 2:
+            # 2D: find nearest vertex in x-y plane
+            dists = np.sqrt(
+                (verts[:, 0] - vertex_pos[0])**2
+                + (verts[:, 1] - vertex_pos[1])**2
+            )
+        else:
+            dists = np.linalg.norm(verts - vertex_pos[np.newaxis, :], axis=1)
+
+        vi = int(np.argmin(dists))
+
+        if tol is None:
+            tol = float(np.mean(rwg_basis.edge_length))
+        if dists[vi] > tol:
+            raise ValueError(
+                f"Port.from_vertex: nearest vertex is {dists[vi]*1e3:.3f} mm "
+                f"away (tol={tol*1e3:.3f} mm)"
+            )
+
+        # Find all basis functions connected to this vertex
+        indices = []
+        signs = []
+        for n in range(rwg_basis.num_basis):
+            if rwg_basis.free_vertex_plus[n] == vi:
+                # Current flows AWAY from vertex on T+ → sign +1
+                indices.append(n)
+                signs.append(+1)
+            elif rwg_basis.free_vertex_minus[n] == vi:
+                # Current flows TOWARD vertex on T- → sign -1 for outward
+                indices.append(n)
+                signs.append(-1)
+
+        if not indices:
+            raise ValueError(
+                f"Port.from_vertex: no RWG edges found at vertex {vi} "
+                f"({verts[vi]})"
+            )
+
+        return Port(
+            name=name,
+            feed_basis_indices=indices,
+            feed_signs=signs,
+        )
+
+    @staticmethod
     def differential(
         mesh,
         rwg_basis,

@@ -8,6 +8,7 @@ from .mesh_plot import (
     plot_surface_current_vectors,
     compute_triangle_current_vectors,
     plot_array_layout,
+    plot_structure_with_ports,
 )
 
 from .plot_style import (
@@ -27,6 +28,8 @@ from .plot_style import (
     format_plane_wave_annotation,
 )
 
+from .peec_plot import plot_peec_currents
+
 from .inductor_plots import (
     plot_inductor_characterization,
     plot_model_fit,
@@ -45,6 +48,7 @@ __all__ = [
     'plot_surface_current_vectors',
     'compute_triangle_current_vectors',
     'plot_array_layout',
+    'plot_structure_with_ports',
     # Plot style configuration
     'configure_latex_style',
     'restore_default_style',
@@ -71,4 +75,6 @@ __all__ = [
     # Annotation helpers
     'format_resonance_annotation',
     'format_plane_wave_annotation',
+    # PEEC visualization
+    'plot_peec_currents',
 ]

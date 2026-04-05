@@ -36,7 +36,8 @@ import matplotlib.pyplot as plt
 from pyMoM3d import (
     GmshMesher,
     compute_rwg_connectivity,
-    fill_impedance_matrix,
+    fill_matrix,
+    EFIEOperator,
     solve_direct,
     compute_far_field,
     plot_surface_current,
@@ -341,7 +342,7 @@ def main():
 
     exc_single = StripDeltaGapExcitation(feed_basis_indices=feed_single, voltage=1.0)
     V_single = exc_single.compute_voltage_vector(basis_single, mesh_single, k)
-    Z_mat = fill_impedance_matrix(basis_single, mesh_single, k, eta0)
+    Z_mat = fill_matrix(EFIEOperator(),basis_single, mesh_single, k, eta0)
     I_single = solve_direct(Z_mat, V_single)
 
     Z_self = exc_single.compute_input_impedance(I_single, basis_single, mesh_single)
@@ -408,7 +409,7 @@ def main():
         # Excite TX only (RX short-circuited: V=0)
         exc_tx = StripDeltaGapExcitation(feed_basis_indices=feed_tx, voltage=1.0)
         V_comb = exc_tx.compute_voltage_vector(basis_comb, combined, k)
-        Z_comb = fill_impedance_matrix(basis_comb, combined, k, eta0)
+        Z_comb = fill_matrix(EFIEOperator(),basis_comb, combined, k, eta0)
         I_comb = solve_direct(Z_comb, V_comb)
 
         # TX input power: P_tx = 0.5 * Re(V_0 * conj(I_tx_terminal))
@@ -488,7 +489,7 @@ def main():
         # Excite TX only
         exc_tx = StripDeltaGapExcitation(feed_basis_indices=feed_tx, voltage=1.0)
         V_comb = exc_tx.compute_voltage_vector(basis_comb, combined, k)
-        Z_comb = fill_impedance_matrix(basis_comb, combined, k, eta0)
+        Z_comb = fill_matrix(EFIEOperator(),basis_comb, combined, k, eta0)
         I_comb = solve_direct(Z_comb, V_comb)
 
         # Power extraction
@@ -701,7 +702,7 @@ def main():
     feed_tx_vis = find_feed_edges_at_z(combined_vis, basis_vis, 0.0, z_center=0.0)
     exc_vis = StripDeltaGapExcitation(feed_basis_indices=feed_tx_vis, voltage=1.0)
     V_vis = exc_vis.compute_voltage_vector(basis_vis, combined_vis, k)
-    Z_vis = fill_impedance_matrix(basis_vis, combined_vis, k, eta0)
+    Z_vis = fill_matrix(EFIEOperator(),basis_vis, combined_vis, k, eta0)
     I_vis = solve_direct(Z_vis, V_vis)
 
     fig4 = plt.figure(figsize=(12, 6))

@@ -7,7 +7,8 @@ from pyMoM3d.fields.far_field import compute_far_field
 from pyMoM3d.fields.rcs import compute_rcs, compute_monostatic_rcs
 from pyMoM3d.analysis.mie_series import mie_rcs_pec_sphere, mie_monostatic_rcs_pec_sphere
 from pyMoM3d.mesh import Mesh, compute_rwg_connectivity
-from pyMoM3d.mom.impedance import fill_impedance_matrix
+from pyMoM3d.mom.assembly import fill_matrix
+from pyMoM3d.mom.operators import EFIEOperator
 from pyMoM3d.mom.excitation import PlaneWaveExcitation
 from pyMoM3d.mom.solver import solve_direct
 from pyMoM3d.utils.constants import eta0, c0
@@ -81,7 +82,7 @@ class TestFarFieldComputation:
         basis = compute_rwg_connectivity(mesh)
 
         k = 2 * np.pi
-        Z = fill_impedance_matrix(basis, mesh, k, eta0, quad_order=4)
+        Z = fill_matrix(EFIEOperator(), basis, mesh, k, eta0, quad_order=4)
         exc = PlaneWaveExcitation(
             E0=np.array([1.0, 0.0, 0.0]),
             k_hat=np.array([0.0, 0.0, -1.0]),

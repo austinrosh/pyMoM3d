@@ -53,8 +53,10 @@ class StrataBackend(GreensBackend):
         Layer containing the MoM mesh (source and observation both assumed
         in this layer — the common same-layer case).
     method : str
-        Strata computation method: 'dcim' (default, fast), 'integrate'
-        (exact Sommerfeld, slow, useful for validation), or 'quasistatic'.
+        Strata computation method: 'dcim' (default, fast), 'interpolate'
+        (tabulated Sommerfeld, captures surface wave poles), 'integrate'
+        (exact per-point Sommerfeld, slow, useful for validation), or
+        'quasistatic'.
 
     Raises
     ------
@@ -71,6 +73,7 @@ class StrataBackend(GreensBackend):
         frequency: float,
         source_layer: Layer,
         method: str = 'dcim',
+        rho_max: float = 0.0,
     ):
         try:
             from pyMoM3d.greens.layered import strata_kernels as _sk
@@ -92,28 +95,38 @@ class StrataBackend(GreensBackend):
         self._freq        = float(frequency)
         self._src_layer   = source_layer
         self._method      = method
+        self._rho_max     = float(rho_max)
 
-        # DCIM fails with dual-PEC half-spaces (Ze=0 → Ye=1/Ze=inf in
-        # Strata's spectral MGF).  Workaround: replace PEC flags with very
-        # high conductivity (σ=1e8 S/m), which gives identical results to
-        # within ~1e-5 relative error while keeping DCIM numerically stable.
+        # PEC half-space workarounds:
+        # - DCIM + dual-PEC: Ze=0 → Ye=1/Ze=inf in spectral MGF.
+        # - Interpolate / integrate + any PEC: Sommerfeld integration segfaults.
+        # Workaround: replace PEC flags with very high conductivity (σ=1e8 S/m),
+        # which gives identical results to within ~1e-5 relative error.
         self._pec_sigma_workaround = False
-        if self._method == "dcim":
-            has_pec_top = has_pec_bot = False
-            for lyr in self._stack.layers:
-                if not math.isfinite(lyr.z_top) and getattr(lyr, 'is_pec', False):
-                    has_pec_top = True
-                if not math.isfinite(lyr.z_bot) and getattr(lyr, 'is_pec', False):
-                    has_pec_bot = True
-            if has_pec_top and has_pec_bot:
-                import warnings
-                warnings.warn(
-                    "Dual-PEC half-spaces: replacing PEC flags with high "
-                    "conductivity (σ=1e8 S/m) to avoid Strata DCIM "
-                    "singularity (Ze=0 → Ye=1/Ze=inf).",
-                    stacklevel=2,
-                )
-                self._pec_sigma_workaround = True
+        has_pec_top = has_pec_bot = False
+        for lyr in self._stack.layers:
+            if not math.isfinite(lyr.z_top) and getattr(lyr, 'is_pec', False):
+                has_pec_top = True
+            if not math.isfinite(lyr.z_bot) and getattr(lyr, 'is_pec', False):
+                has_pec_bot = True
+        if self._method == "dcim" and has_pec_top and has_pec_bot:
+            import warnings
+            warnings.warn(
+                "Dual-PEC half-spaces: replacing PEC flags with high "
+                "conductivity (σ=1e8 S/m) to avoid Strata DCIM "
+                "singularity (Ze=0 → Ye=1/Ze=inf).",
+                stacklevel=2,
+            )
+            self._pec_sigma_workaround = True
+        elif self._method in ("interpolate", "integrate") and (has_pec_top or has_pec_bot):
+            import warnings
+            warnings.warn(
+                "PEC half-space with Sommerfeld integration: replacing PEC "
+                "flag with high conductivity (σ=1e8 S/m) to avoid "
+                "Strata integration segfault.",
+                stacklevel=2,
+            )
+            self._pec_sigma_workaround = True
 
         # Strata requires at least one finite interior layer.  Pure halfspace
         # stacks (e.g., air-over-Si with no finite slab) should use
@@ -221,6 +234,12 @@ class StrataBackend(GreensBackend):
         else:
             z_src = 0.0
 
+        # Extra z-nodes for DCIM: only needed when mesh spans the full
+        # layer thickness (e.g., edge port plates). For flat strips at a
+        # single z, extra nodes degrade accuracy. Leave empty by default;
+        # the caller should set extra_z_nodes on the backend when needed.
+        extra_z_nodes = self._extra_z_nodes if hasattr(self, '_extra_z_nodes') else []
+
         # Source-layer wavenumber and effective permittivity for the C++ wrapper.
         # Strata's G_phi uses Formulation-C convention (G_phi = g/ε_r); the
         # wrapper multiplies by ε_r before subtracting the free-space g_fs.
@@ -237,6 +256,8 @@ class StrataBackend(GreensBackend):
             k_src.real, k_src.imag,
             eps_r_eff.real, eps_r_eff.imag,
             self._method,
+            self._rho_max,
+            extra_z_nodes,
         )
 
     def _build_model_for_pair(
@@ -330,6 +351,7 @@ class StrataBackend(GreensBackend):
             k_src.real, k_src.imag,
             eps_r_eff.real, eps_r_eff.imag,
             self._method,
+            self._rho_max,
         )
 
     # ------------------------------------------------------------------

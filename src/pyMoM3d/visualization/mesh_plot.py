@@ -784,3 +784,121 @@ def plot_array_layout(
                 all_v.max() + dipole_length + margin)
 
     return ax
+
+
+def plot_structure_with_ports(
+    mesh: Mesh,
+    port_x_list: list = None,
+    port_labels: list = None,
+    reference_plane_x: list = None,
+    projection: str = 'xy',
+    ax: Optional[plt.Axes] = None,
+    color: str = 'lightblue',
+    alpha: float = 0.7,
+    edge_color: str = 'gray',
+    edge_width: float = 0.3,
+    port_color: str = 'red',
+    ref_color: str = 'blue',
+    title: Optional[str] = None,
+    mm_units: bool = True,
+) -> plt.Axes:
+    """Plot a 2D mesh projection with port locations and reference planes.
+
+    Parameters
+    ----------
+    mesh : Mesh
+        Mesh object to visualize.
+    port_x_list : list of float, optional
+        x-coordinates of port feed lines.
+    port_labels : list of str, optional
+        Labels for each port (e.g., ['P1', 'P2']). Defaults to P1, P2, ...
+    reference_plane_x : list of float, optional
+        x-coordinates of reference planes (drawn as dashed lines).
+    projection : str, default 'xy'
+        Projection plane: 'xy', 'xz', or 'yz'.
+    ax : matplotlib.axes.Axes, optional
+        Existing 2D axes. If None, creates new figure and axes.
+    color : str
+        Face color for mesh triangles.
+    alpha : float
+        Transparency of mesh faces.
+    edge_color : str
+        Color for mesh edges.
+    edge_width : float
+        Width of mesh edges.
+    port_color : str
+        Color for port lines.
+    ref_color : str
+        Color for reference plane lines.
+    title : str, optional
+        Custom title.
+    mm_units : bool, default True
+        Convert axis labels and ticks to millimeters.
+
+    Returns
+    -------
+    ax : matplotlib.axes.Axes
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 4))
+
+    # Map projection to axis indices
+    proj_map = {'xy': (0, 1), 'xz': (0, 2), 'yz': (1, 2)}
+    if projection not in proj_map:
+        raise ValueError(f"projection must be one of {list(proj_map.keys())}")
+    idx1, idx2 = proj_map[projection]
+
+    scale = 1e3 if mm_units else 1.0
+    unit_str = 'mm' if mm_units else 'm'
+
+    # Plot mesh triangles
+    for tri in mesh.triangles:
+        verts = mesh.vertices[tri]
+        x = verts[:, idx1] * scale
+        y = verts[:, idx2] * scale
+        ax.fill(x, y, color=color, alpha=alpha,
+                edgecolor=edge_color, linewidth=edge_width)
+
+    # Compute y-extent for vertical annotation lines
+    v = mesh.vertices
+    y_lo = v[:, idx2].min() * scale
+    y_hi = v[:, idx2].max() * scale
+    y_span = y_hi - y_lo
+    label_y = y_hi + 0.08 * y_span
+
+    # Port lines
+    if port_x_list:
+        if port_labels is None:
+            port_labels = [f'P{i+1}' for i in range(len(port_x_list))]
+        for px, label in zip(port_x_list, port_labels):
+            px_s = px * scale
+            ax.plot([px_s, px_s], [y_lo, y_hi], color=port_color,
+                    lw=2.0, ls='-', zorder=5)
+            ax.text(px_s, label_y, label, color=port_color,
+                    ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    # Reference plane lines
+    if reference_plane_x:
+        for rx in reference_plane_x:
+            rx_s = rx * scale
+            ax.plot([rx_s, rx_s], [y_lo, y_hi], color=ref_color,
+                    lw=1.5, ls='--', zorder=4)
+            ax.text(rx_s, label_y, 'Ref', color=ref_color,
+                    ha='center', va='bottom', fontsize=8)
+
+    # Labels
+    labels = [
+        rf'$x$ ({unit_str})', rf'$y$ ({unit_str})', rf'$z$ ({unit_str})'
+    ]
+    ax.set_xlabel(labels[idx1])
+    ax.set_ylabel(labels[idx2])
+    ax.set_aspect('equal')
+    ax.grid(True, alpha=0.3)
+
+    if title:
+        ax.set_title(title)
+    else:
+        n_t = mesh.get_num_triangles()
+        ax.set_title(rf'Structure mesh ($N_t = {n_t}$)')
+
+    return ax

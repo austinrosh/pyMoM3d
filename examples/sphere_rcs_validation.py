@@ -20,7 +20,8 @@ from pyMoM3d import (
     Sphere,
     GmshMesher,
     compute_rwg_connectivity,
-    fill_impedance_matrix,
+    fill_matrix,
+    EFIEOperator,
     PlaneWaveExcitation,
     solve_direct,
     compute_far_field,
@@ -91,7 +92,7 @@ def main():
         wavelength = c0 / freq
 
         # MoM solve
-        Z = fill_impedance_matrix(basis, mesh, k, eta0, quad_order=4)
+        Z = fill_matrix(EFIEOperator(), basis, mesh, k, eta0, quad_order=4)
         V = exc.compute_voltage_vector(basis, mesh, k)
         I = solve_direct(Z, V)
 
@@ -119,7 +120,7 @@ def main():
     k_bi = 2.0 * np.pi * f_bistatic / c0
     ka_bi = k_bi * radius
 
-    Z_bi = fill_impedance_matrix(basis, mesh, k_bi, eta0, quad_order=4)
+    Z_bi = fill_matrix(EFIEOperator(), basis, mesh, k_bi, eta0, quad_order=4)
     V_bi = exc.compute_voltage_vector(basis, mesh, k_bi)
     I_bi = solve_direct(Z_bi, V_bi)
 
