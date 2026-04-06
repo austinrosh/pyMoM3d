@@ -223,6 +223,31 @@ pytest tests/ -v
 - [Getting Started](docs/tutorial/getting-started.md) — installation, C++ backend build, quick starts
 - [Examples Guide](docs/tutorial/examples-guide.md) — detailed walkthrough of each example
 
+## In Development (`feature/multilayer-greens`)
+
+> **This branch is under active development and is not stable.** APIs may change without notice.
+
+Work is underway to extend pyMoM3d to layered-medium (multilayer) problems — microstrip, stripline, and other planar transmission line structures on stratified substrates.
+
+**Implemented (varying levels of validation):**
+
+- Stratified media modeling via `LayerStack` with N-layer support
+- Multilayer EFIE operator using MPIE (Michalski-Zheng Formulation C) Green's functions
+- C++ multilayer assembly kernel via [Strata](https://github.com/austinrothschild/strata) DCIM backend
+- Quasi-static solver with probe feeds for low-frequency extraction
+- 2D FDM cross-section solver for transmission line parameters (Z0, eps_eff, gamma)
+- PEEC module for spiral inductor and short trace characterization
+- Analytical transmission line de-embedding (ABCD cascade)
+- Port discontinuity calibration via through-standard extraction
+- Non-radiating port model (half-RWG basis functions)
+
+**Planned:**
+
+- Full-wave stripline validation with Strata
+- Wideband port model improvements
+- Solver dispatch layer (automatic QS/full-wave selection)
+- GDS layout import
+
 ## References
 
 - S.M. Rao, D.R. Wilton, A.W. Glisson, "Electromagnetic scattering by surfaces of arbitrary shape," *IEEE Trans. AP*, 30(3), 1982.

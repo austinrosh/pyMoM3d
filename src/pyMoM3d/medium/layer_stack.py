@@ -266,3 +266,60 @@ class LayerStack:
                 conductivity=float(entry.get('conductivity', 0.0)),
             ))
         return cls(layers=layers)
+
+    # ------------------------------------------------------------------
+    # Factory: microstrip with phantom air layer
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def make_microstrip_stack(
+        cls,
+        h_sub: float,
+        eps_r: float,
+        delta: float = None,
+        phantom_eps_r: float = 1.001,
+    ) -> 'LayerStack':
+        """Create a microstrip layer stack with a phantom air layer.
+
+        Strata requires source points inside a finite layer, not in the
+        upper half-space.  For microstrip, the strip sits at the
+        substrate/air boundary.  A thin phantom air layer above the
+        substrate places the strip inside a finite layer and ensures the
+        DCIM fitting point is close to the mesh z-coordinate.
+
+        Parameters
+        ----------
+        h_sub : float
+            Substrate thickness (m).
+        eps_r : float
+            Substrate relative permittivity.
+        delta : float, optional
+            Phantom layer thickness (m).  Default: ``h_sub * 0.01``.
+        phantom_eps_r : float, optional
+            Phantom layer permittivity.  Must differ from 1.0 to
+            prevent Strata from merging it with the air half-space.
+            Default 1.001.
+
+        Returns
+        -------
+        LayerStack
+            4-layer stack: ``pec_ground``, ``substrate``,
+            ``phantom_air``, ``air``.
+
+        Notes
+        -----
+        Use ``source_layer_name='phantom_air'`` for the 3-D Green's
+        function, but ``strip_z=h_sub`` (or
+        ``source_layer_name='substrate'``) when calling
+        ``compute_reference_impedance``.
+        """
+        if delta is None:
+            delta = h_sub * 0.01
+        return cls(layers=[
+            Layer('pec_ground', z_bot=-np.inf, z_top=0.0,
+                  eps_r=1.0, is_pec=True),
+            Layer('substrate', z_bot=0.0, z_top=h_sub, eps_r=eps_r),
+            Layer('phantom_air', z_bot=h_sub, z_top=h_sub + delta,
+                  eps_r=phantom_eps_r),
+            Layer('air', z_bot=h_sub + delta, z_top=np.inf, eps_r=1.0),
+        ])

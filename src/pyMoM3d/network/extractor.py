@@ -184,6 +184,7 @@ class NetworkExtractor:
     def extract(
         self,
         frequencies: Union[None, float, List[float]] = None,
+        variational: bool = False,
     ) -> List[NetworkResult]:
         """Extract network parameters at one or more frequencies.
 
@@ -194,6 +195,16 @@ class NetworkExtractor:
         frequencies : float or list of float, optional
             Frequencies (Hz) at which to extract parameters.  If None,
             uses ``simulation.config.frequency``.
+        variational : bool, optional
+            When True, use the variational admittance formula
+            (Lo, Jiang & Chew 2013, eq. 13) for second-order accurate
+            Y-matrix extraction:
+
+                Y[q,p] = 2*<V_q, I_p>/(V_q*V_p) + <I_q, Z*I_p>/(V_q*V_p)
+
+            Requires the impedance matrix Z_sys to be available (standard
+            EFIE path, not A-EFIE or loop-star).  Falls back to direct
+            extraction when Z_sys is not available.  Default False.
 
         Returns
         -------
@@ -237,10 +248,12 @@ class NetworkExtractor:
 
             # 2. Build (N, P) RHS matrix — one column per port
             V_all = np.column_stack([
-                p.build_excitation_vector(_basis_for_ports) for p in self.ports
+                p.build_excitation_vector(_basis_for_ports, mesh=self.sim.mesh)
+                for p in self.ports
             ])
 
-            # 3. Solve
+            # 3. Solve (Z_sys is retained for variational extraction)
+            Z_sys = None
             if stab == 'aefie':
                 I_all = self._solve_aefie(freq, k, eta, V_all)
             elif stab == 'loop_star':
@@ -292,20 +305,29 @@ class NetworkExtractor:
                     self._last_cond = float('inf')
 
             # 4. Z-matrix extraction
-            #
-            # MoM delta-gap excitation shorts non-excited ports (V_q = 0),
-            # so the terminal currents give the Y-matrix directly:
-            #   Y[q, p] = I_term[q, p] / V_ref_p
-            # The Z-matrix is obtained by matrix inversion: Z = inv(Y).
-            #
-            # For a single port this reduces to Z = V_ref / I_term (scalar).
             P = len(self.ports)
-            Y_mat = np.zeros((P, P), dtype=np.complex128)
-            for q, port_q in enumerate(self.ports):
-                for p in range(P):
-                    I_term = port_q.terminal_current(I_all[:, p], _basis_for_ports)
-                    V_ref  = self.ports[p].V_ref
-                    Y_mat[q, p] = I_term / V_ref
+
+            # Variational Y (Lo/Jiang/Chew 2013, eq. 13-18):
+            #   Y_var[q,p] = 2*<V_q, I_p>/(V_q*V_p) + <Z*I_p, I_q>/(V_q*V_p)
+            # Second-order accurate: error in Y is O(delta_I^2).
+            # Requires Z_sys which is only available in the standard EFIE path.
+            use_variational = (
+                variational and Z_sys is not None
+            )
+
+            if use_variational:
+                Y_mat = self._variational_Y(I_all, V_all, Z_sys)
+            else:
+                # Direct Y extraction (standard):
+                #   Y[q, p] = I_term[q, p] / V_ref_p
+                Y_mat = np.zeros((P, P), dtype=np.complex128)
+                for q, port_q in enumerate(self.ports):
+                    for p in range(P):
+                        I_term = port_q.terminal_current(
+                            I_all[:, p], _basis_for_ports,
+                        )
+                        V_ref = self.ports[p].V_ref
+                        Y_mat[q, p] = I_term / V_ref
 
             if P == 1:
                 # Single port: Z = 1/Y (avoid unnecessary matrix ops)
@@ -337,6 +359,61 @@ class NetworkExtractor:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _variational_Y(
+        self,
+        I_all: np.ndarray,
+        V_all: np.ndarray,
+        Z_sys: np.ndarray,
+    ) -> np.ndarray:
+        """Compute Y-matrix using the variational formula.
+
+        Lo, Jiang & Chew (2013) eq. 13-18.  The variational admittance
+        derives from Y = <E_a,J>/V² + <E_total,J>/V², which expands to:
+
+            Y[q,p] = (2 * V_q^T I_p  -  I_q^T Z I_p) / (V_q V_p)
+
+        The bilinear form (no conjugation) is used because MoM reaction
+        integrals are bilinear, not sesquilinear.  The MINUS sign on the
+        I^T Z I term arises because <E_scat,J> = -I^T Z I in EFIE
+        convention (E_scat = -(jωA + ∇φ)).
+
+        For exact (LU) solutions with delta-gap excitation, Y_var = Y_direct
+        exactly.  For finite-width excitation, the distributed V captures
+        reactions beyond the terminal edges, so Y_var ≠ Y_direct and is
+        generally more accurate.  For iterative (approximate) solutions,
+        the formula is second-order accurate in the current error.
+
+        Parameters
+        ----------
+        I_all : ndarray, shape (N, P)
+        V_all : ndarray, shape (N, P)
+        Z_sys : ndarray, shape (N, N)
+
+        Returns
+        -------
+        Y : ndarray, shape (P, P)
+        """
+        P = len(self.ports)
+        Y = np.zeros((P, P), dtype=np.complex128)
+
+        # Precompute Z @ I for each port: w[:, p] = Z_sys @ I_all[:, p]
+        # This is O(N^2 * P) — dominates the variational cost but is
+        # negligible compared to the O(N^3) LU factorization.
+        ZI = Z_sys @ I_all  # (N, P)
+
+        for q in range(P):
+            V_q = self.ports[q].V_ref
+            for p in range(P):
+                V_p = self.ports[p].V_ref
+                # Reaction integrals use the BILINEAR form (no conjugation).
+                # <E_a, J_p> = V^T I (NOT conj(V)^T I).
+                # Term 1: 2 * <V_q, I_p> = 2 * V_all[:,q]^T @ I_all[:,p]
+                term1 = 2.0 * (V_all[:, q] @ I_all[:, p])
+                # Term 2: <E_scat, J> = -I^T Z I in EFIE convention
+                term2 = I_all[:, q] @ ZI[:, p]
+                Y[q, p] = (term1 - term2) / (V_q * V_p)
+        return Y
 
     def _make_operator(self, frequency: float = None):
         """Return the appropriate impedance operator from the Simulation config."""

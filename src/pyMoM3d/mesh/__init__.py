@@ -6,6 +6,7 @@ from .gmsh_mesher import GmshMesher
 from .rwg_connectivity import compute_rwg_connectivity
 from .rwg_basis import RWGBasis
 from .mirror import mirror_mesh_x, combine_meshes, extract_submesh
+from .port_mesh import split_mesh_at_x, split_mesh_at_ports, add_half_rwg_basis
 
 __all__ = [
     'Mesh',
@@ -17,4 +18,7 @@ __all__ = [
     'mirror_mesh_x',
     'combine_meshes',
     'extract_submesh',
+    'split_mesh_at_x',
+    'split_mesh_at_ports',
+    'add_half_rwg_basis',
 ]

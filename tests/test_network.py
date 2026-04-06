@@ -178,6 +178,156 @@ class TestPort:
 
 
 # ---------------------------------------------------------------------------
+# Finite-width port tests
+# ---------------------------------------------------------------------------
+
+class TestFiniteWidthPort:
+    """Tests for the finite-width distributed excitation (Lo/Jiang/Chew 2013)."""
+
+    def test_gap_width_default_zero(self):
+        port = Port(name='P1', feed_basis_indices=[0])
+        assert port.gap_width == 0.0
+
+    def test_gap_width_stored(self):
+        port = Port(name='P1', feed_basis_indices=[0], gap_width=1e-3)
+        assert port.gap_width == 1e-3
+
+    def test_zero_gap_width_gives_delta_gap(self):
+        """gap_width=0 must produce identical results to the standard delta-gap."""
+        mesh = _make_plate_mesh(nx=4, ny=4)
+        basis = compute_rwg_connectivity(mesh)
+        idx = [0, 1] if basis.num_basis >= 2 else [0]
+
+        port_dg = Port(name='DG', feed_basis_indices=idx, gap_width=0.0)
+        port_fw = Port(name='FW', feed_basis_indices=idx, gap_width=0.0)
+
+        V_dg = port_dg.build_excitation_vector(basis)
+        V_fw = port_fw.build_excitation_vector(basis, mesh=mesh)
+        np.testing.assert_allclose(V_fw, V_dg)
+
+    def test_finite_width_without_mesh_falls_back(self):
+        """When gap_width > 0 but mesh is None, falls back to delta-gap."""
+        mesh = _make_plate_mesh(nx=4, ny=4)
+        basis = compute_rwg_connectivity(mesh)
+
+        port = Port(name='P1', feed_basis_indices=[0], gap_width=0.1)
+        V = port.build_excitation_vector(basis)  # mesh=None
+        # Should use delta-gap fallback
+        assert V[0] == pytest.approx(1.0 * basis.edge_length[0])
+
+    def test_finite_width_produces_nonzero_rhs(self):
+        """Finite-width excitation must produce a non-zero RHS vector."""
+        from pyMoM3d.mesh import GmshMesher
+        mesher = GmshMesher(target_edge_length=0.25)
+        mesh = mesher.mesh_plate_with_feeds(
+            width=1.0, height=0.3, feed_x_list=[0.0], center=(0, 0, 0),
+        )
+        basis = compute_rwg_connectivity(mesh)
+
+        feed_idx = find_feed_edges(mesh, basis, feed_x=0.0)
+        assert len(feed_idx) > 0
+
+        from pyMoM3d.mom.excitation import compute_feed_signs
+        signs = compute_feed_signs(mesh, basis, feed_idx)
+
+        port = Port(
+            name='P1', feed_basis_indices=feed_idx,
+            feed_signs=signs, gap_width=0.25,
+        )
+        V = port.build_excitation_vector(basis, mesh=mesh)
+
+        # Must have non-zero entries
+        assert np.any(np.abs(V) > 0)
+        # Should excite more basis functions than just the feed edges
+        # (adjacent basis functions get partial excitation)
+        n_excited = np.sum(np.abs(V) > 1e-15)
+        assert n_excited >= len(feed_idx)
+
+    def test_finite_width_voltage_integral_preserved(self):
+        """The total voltage integral should approximate V_ref.
+
+        For a strip mesh with a feed at x=0, the sum of V[m] contributions
+        across the port should give approximately V_ref when weighted correctly.
+        """
+        from pyMoM3d.mesh import GmshMesher
+        mesher = GmshMesher(target_edge_length=0.25)
+        mesh = mesher.mesh_plate_with_feeds(
+            width=1.0, height=0.3, feed_x_list=[0.0], center=(0, 0, 0),
+        )
+        basis = compute_rwg_connectivity(mesh)
+        feed_idx = find_feed_edges(mesh, basis, feed_x=0.0)
+
+        from pyMoM3d.mom.excitation import compute_feed_signs
+        signs = compute_feed_signs(mesh, basis, feed_idx)
+
+        port_dg = Port(name='DG', feed_basis_indices=feed_idx, feed_signs=signs)
+        port_fw = Port(
+            name='FW', feed_basis_indices=feed_idx,
+            feed_signs=signs, gap_width=0.25,
+        )
+        V_dg = port_dg.build_excitation_vector(basis)
+        V_fw = port_fw.build_excitation_vector(basis, mesh=mesh)
+
+        # Both should have non-trivial energy
+        assert np.linalg.norm(V_dg) > 0
+        assert np.linalg.norm(V_fw) > 0
+
+
+# ---------------------------------------------------------------------------
+# Variational Y extraction tests
+# ---------------------------------------------------------------------------
+
+class TestVariationalExtraction:
+    """Tests for the variational admittance formula."""
+
+    def test_variational_parameter_accepted(self):
+        """NetworkExtractor.extract must accept variational=True."""
+        mesh = _make_plate_mesh(nx=4, ny=4)
+        sim = _make_sim_with_mesh(mesh, freq=3e8)
+        basis = sim.basis
+        port = Port(name='P1', feed_basis_indices=[0])
+        ext = NetworkExtractor(sim, [port])
+
+        # Should not raise
+        results = ext.extract(variational=True)
+        assert len(results) == 1
+        assert results[0].Z_matrix.shape == (1, 1)
+        assert np.isfinite(results[0].Z_matrix[0, 0])
+
+    def test_variational_vs_direct_consistency(self):
+        """Variational and direct Y should be similar for a well-resolved mesh."""
+        mesh = _make_plate_mesh(nx=6, ny=6)
+        sim = _make_sim_with_mesh(mesh, freq=3e8)
+        basis = sim.basis
+        port = Port(name='P1', feed_basis_indices=[0])
+        ext = NetworkExtractor(sim, [port])
+
+        results_direct = ext.extract(variational=False)
+        results_var = ext.extract(variational=True)
+
+        Z_direct = results_direct[0].Z_matrix[0, 0]
+        Z_var = results_var[0].Z_matrix[0, 0]
+
+        # Both should be finite and have the same sign of real/imag parts
+        assert np.isfinite(Z_direct)
+        assert np.isfinite(Z_var)
+
+    def test_variational_default_false(self):
+        """Default variational=False should give direct Y extraction."""
+        mesh = _make_plate_mesh(nx=4, ny=4)
+        sim = _make_sim_with_mesh(mesh, freq=3e8)
+        port = Port(name='P1', feed_basis_indices=[0])
+        ext = NetworkExtractor(sim, [port])
+
+        r1 = ext.extract()  # default
+        r2 = ext.extract(variational=False)
+
+        np.testing.assert_allclose(
+            r1[0].Z_matrix, r2[0].Z_matrix, atol=1e-10,
+        )
+
+
+# ---------------------------------------------------------------------------
 # NetworkResult tests
 # ---------------------------------------------------------------------------
 

@@ -886,6 +886,69 @@ class GmshMesher:
         surf = gmsh.model.occ.addPlaneSurface([cl])
         return surf
 
+    def mesh_microstrip_with_gap_ports(
+        self,
+        width: float,
+        length: float,
+        port_x_list: list,
+        substrate_height: float = None,
+        center: Tuple[float, float, float] = None,
+        target_edge_length: Optional[float] = None,
+    ) -> Tuple[Mesh, list]:
+        """Generate a microstrip strip with non-radiating port gaps.
+
+        Creates a planar strip mesh with transverse gaps at each port
+        location.  The gaps are formed by duplicating vertices so that
+        triangles on opposite sides of each port are disconnected.
+        Matched boundary edges at the gaps are suitable for half-RWG
+        basis functions (non-radiating port model).
+
+        Parameters
+        ----------
+        width : float
+            Strip width along y-axis (m).
+        length : float
+            Strip length along x-axis (m).
+        port_x_list : list of float
+            x-coordinates of port gaps (must be within strip extent).
+        substrate_height : float, optional
+            Height above ground plane (m).  Sets the strip z-coordinate.
+            Default: 0.0 (for free-space or when z is set via center).
+        center : tuple of float, optional
+            Center of the strip (x, y, z).  Default: (0, 0, h_sub or 0).
+        target_edge_length : float, optional
+            Override instance-level target edge length.
+
+        Returns
+        -------
+        mesh : Mesh
+            Mesh with port gaps (vertices duplicated at port locations).
+        port_x_list_sorted : list of float
+            Port x-coordinates in sorted order (for use with
+            ``add_half_rwg_basis``).
+        """
+        from .port_mesh import split_mesh_at_ports
+
+        h = substrate_height if substrate_height is not None else 0.0
+        if center is None:
+            center = (0.0, 0.0, h)
+
+        port_x_sorted = sorted(port_x_list)
+
+        # Mesh with conformal edges at port locations
+        base_mesh = self.mesh_plate_with_feeds(
+            width=length,
+            height=width,
+            feed_x_list=port_x_sorted,
+            center=center,
+            target_edge_length=target_edge_length,
+        )
+
+        # Split mesh at each port to create gaps
+        gap_mesh, _ = split_mesh_at_ports(base_mesh, port_x_sorted)
+
+        return gap_mesh, port_x_sorted
+
     def mesh_from_geometry(self, geometry, **kwargs) -> Mesh:
         """
         Generate a mesh from a pyMoM3d geometry primitive.

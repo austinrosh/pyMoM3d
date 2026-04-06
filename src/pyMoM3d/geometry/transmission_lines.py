@@ -67,7 +67,8 @@ def microstrip_geometry(
     L: float,
     eps_r: float,
     tel: Optional[float] = None,
-    margin: float = 3.0e-3,
+    margin: float = 0.0,
+    use_phantom: bool = True,
 ) -> TLGeometry:
     """Create a microstrip transmission line geometry.
 
@@ -84,7 +85,15 @@ def microstrip_geometry(
     tel : float, optional
         Target edge length (m). Defaults to W/3.
     margin : float
-        Distance from strip ends to port locations (m).
+        Distance from strip ends to port locations (m).  Default 0.0
+        places ports at the strip edges.  When a port is within one
+        ``tel`` of a mesh boundary, the mesh is automatically extended
+        by a short stub so the feed edges have two adjacent triangles
+        (required for RWG basis functions).
+    use_phantom : bool
+        If True (default), add a thin phantom air layer above the
+        substrate for correct Strata DCIM fitting.  See
+        :meth:`LayerStack.make_microstrip_stack`.
 
     Returns
     -------
@@ -97,20 +106,35 @@ def microstrip_geometry(
 
     Z0_ana, eps_eff_ana = microstrip_z0_hammerstad(W, H, eps_r)
 
-    stack = LayerStack([
-        Layer('pec_ground', z_bot=-np.inf, z_top=0.0, eps_r=1.0, is_pec=True),
-        Layer('substrate', z_bot=0.0, z_top=H, eps_r=eps_r),
-        Layer('air', z_bot=H, z_top=np.inf, eps_r=1.0),
-    ])
+    if use_phantom:
+        stack = LayerStack.make_microstrip_stack(H, eps_r)
+        src_layer = 'phantom_air'
+    else:
+        stack = LayerStack([
+            Layer('pec_ground', z_bot=-np.inf, z_top=0.0,
+                  eps_r=1.0, is_pec=True),
+            Layer('substrate', z_bot=0.0, z_top=H, eps_r=eps_r),
+            Layer('air', z_bot=H, z_top=np.inf, eps_r=1.0),
+        ])
+        src_layer = 'substrate'
 
     port1_x = -L / 2.0 + margin
     port2_x = +L / 2.0 - margin
 
+    # Ensure mesh extends beyond each port so feed edges are interior
+    # (two adjacent triangles → valid RWG basis).  Use at least W or
+    # 3mm of stub for proper mode coupling at the port.
+    stub = max(tel, min(W, 3.0e-3))
+    mesh_x_lo = min(-L / 2.0, port1_x - stub)
+    mesh_x_hi = max(+L / 2.0, port2_x + stub)
+    mesh_width = mesh_x_hi - mesh_x_lo
+    mesh_cx = (mesh_x_lo + mesh_x_hi) / 2.0
+
     mesher = GmshMesher(target_edge_length=tel)
     mesh = mesher.mesh_plate_with_feeds(
-        width=L, height=W,
+        width=mesh_width, height=W,
         feed_x_list=[port1_x, port2_x],
-        center=(0.0, 0.0, H),
+        center=(mesh_cx, 0.0, H),
     )
     basis = compute_rwg_connectivity(mesh)
 
@@ -129,7 +153,7 @@ def microstrip_geometry(
         basis=basis,
         ports=ports,
         layer_stack=stack,
-        source_layer_name='substrate',
+        source_layer_name=src_layer,
         port_separation=port2_x - port1_x,
         analytical_z0=Z0_ana,
         analytical_eps_eff=eps_eff_ana,

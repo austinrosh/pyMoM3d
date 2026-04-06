@@ -58,6 +58,7 @@ htmlcov/
 # -------------------------
 docs/plans/
 docs/theory
+docs/ports/
 docs/tutorial/api-reference.md
 docs/tutorial/architecture.md
 strata/

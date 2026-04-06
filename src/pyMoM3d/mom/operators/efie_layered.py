@@ -57,10 +57,19 @@ class MultilayerEFIEOperator(EFIEOperator):
         the scalar-potential (Phi) term.  Used for A-EFIE.  Default False.
     """
 
-    def __init__(self, greens_fn: GreensFunctionBase, a_only: bool = False):
+    def __init__(
+        self,
+        greens_fn: GreensFunctionBase,
+        a_only: bool = False,
+        sp_exclude_indices=None,
+    ):
         super().__init__()
         self._greens = greens_fn
         self._a_only = a_only
+        self._sp_exclude = (
+            np.asarray(sorted(sp_exclude_indices), dtype=np.intp)
+            if sp_exclude_indices else np.empty(0, dtype=np.intp)
+        )
         # Detect StrataBackend with a valid model for C++ fast path
         self._strata_model = None
         self._strata_backend = None
@@ -198,6 +207,30 @@ class MultilayerEFIEOperator(EFIEOperator):
                 model_lookup,
                 self._a_only,
             )
+
+            # SP charge exclusion for half-RWG port basis functions
+            # (Liu et al. 2018): half-RWG divergence creates spurious
+            # line charges at the gap edges.  Remove SP only for
+            # port-to-port interactions (both m AND n are port basis)
+            # to eliminate gap capacitance while preserving physical
+            # charge coupling to the rest of the structure.
+            if len(self._sp_exclude) > 0 and not self._a_only:
+                N = Z.shape[0]
+                Z_vp = np.zeros((N, N), dtype=np.complex128)
+                _fill_impedance_multilayer_cpp(
+                    Z_vp, verts, tris, t_plus, t_minus, fv_plus, fv_minus,
+                    a_plus, a_minus, elen, cents, medge, tarea,
+                    weights, bary,
+                    k_real, eta_real, float(near_threshold), int(quad_order),
+                    self._strata_model,
+                    0,
+                    tri_layer_idx,
+                    extra_models,
+                    model_lookup,
+                    True,  # a_only=True → VP-only
+                )
+                idx = self._sp_exclude
+                Z[np.ix_(idx, idx)] = Z_vp[np.ix_(idx, idx)]
         else:
             raise ValueError(
                 f"MultilayerEFIEOperator.fill_fast: unknown backend '{backend}'"
